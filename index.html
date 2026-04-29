@@ -2295,24 +2295,32 @@ const El = {
     },
     closeModal(id) { document.getElementById(id).classList.remove('open'); },
     initModalSwipe() {
-      document.querySelectorAll('.modal-handle').forEach(handle => {
-        if (handle._swipeInit) return;
-        handle._swipeInit = true;
-        const modal = handle.closest('.modal');
-        const overlay = handle.closest('.modal-overlay');
-        if (!modal || !overlay) return;
-        let sy = 0, dy = 0;
-        handle.addEventListener('touchstart', e => {
-          sy = e.touches[0].clientY; dy = 0;
+      document.querySelectorAll('.modal').forEach(modal => {
+        if (modal._swipeInit) return;
+        modal._swipeInit = true;
+        const overlay = modal.closest('.modal-overlay');
+        if (!overlay) return;
+        let sy = 0, dy = 0, dragging = false;
+        // Attach to the handle area (top 56px of modal) for swipe-to-dismiss
+        modal.addEventListener('touchstart', e => {
+          const touchY = e.touches[0].clientY;
+          const modalTop = modal.getBoundingClientRect().top;
+          // Only initiate swipe if touch starts in the top 56px (handle zone)
+          if (touchY - modalTop > 56) return;
+          dragging = true;
+          sy = touchY; dy = 0;
           modal.style.transition = 'none';
         }, { passive: true });
-        handle.addEventListener('touchmove', e => {
+        modal.addEventListener('touchmove', e => {
+          if (!dragging) return;
           dy = Math.max(0, e.touches[0].clientY - sy);
           modal.style.transform = 'translateY(' + dy + 'px)';
         }, { passive: true });
-        handle.addEventListener('touchend', () => {
+        modal.addEventListener('touchend', () => {
+          if (!dragging) return;
+          dragging = false;
           modal.style.transition = 'transform 0.22s ease';
-          if (dy > 80) {
+          if (dy > 60) {
             modal.style.transform = 'translateY(110%)';
             setTimeout(() => { modal.style.transform = ''; modal.style.transition = ''; overlay.classList.remove('open'); }, 220);
           } else {
@@ -2326,6 +2334,8 @@ const El = {
     setTxnType(type) {
       document.querySelectorAll('#txn-type-tabs .tab').forEach((t,i)=>t.classList.toggle('active',['expense','income'][i]===type));
       document.getElementById('txn-category').closest('.form-group').style.display = type==='income'?'none':'block';
+      const lbl = document.querySelector('label[for="txn-recurring"]');
+      if (lbl) lbl.textContent = type==='income' ? 'Make this recurring income' : 'Make this a recurring expense';
     },
     toggleEditRecurring(on) {
       const fields = document.getElementById('edit-txn-recurring-fields');
@@ -2337,6 +2347,8 @@ const El = {
     },
     setEditTxnType(type) {
       document.querySelectorAll('#edit-txn-type-tabs .tab').forEach((t,i)=>t.classList.toggle('active',['expense','income'][i]===type));
+      const span = document.querySelector('#edit-txn-recurring-wrap span');
+      if (span) span.textContent = type==='income' ? 'Make this recurring income' : 'Make this a recurring expense';
     },
     drawHealthRing(score, color) {
       const canvas = document.getElementById('health-canvas');
@@ -3240,6 +3252,27 @@ const El = {
       if (this.calMonth < 0) { this.calMonth=11; this.calYear--; }
       this.renderCalendar();
     },
+    // Returns recurring expenses that fall on a given date string
+    recurringOnDate(dateStr) {
+      const d = El.state.get();
+      const target = new Date(dateStr + 'T12:00:00');
+      return (d.recurring || []).filter(r => {
+        if (!r.nextDate) return false;
+        const ref = new Date(r.nextDate + 'T12:00:00');
+        const freq = r.frequency || 'monthly';
+        if (freq === 'weekly') {
+          const diff = Math.round((target - ref) / 86400000);
+          return diff % 7 === 0;
+        } else if (freq === 'biweekly') {
+          const diff = Math.round((target - ref) / 86400000);
+          return diff % 14 === 0;
+        } else if (freq === 'yearly') {
+          return target.getMonth() === ref.getMonth() && target.getDate() === ref.getDate();
+        } else { // monthly
+          return target.getDate() === ref.getDate();
+        }
+      });
+    },
     renderCalendar() {
       const d = El.state.get();
       const first = new Date(this.calYear, this.calMonth, 1);
@@ -3259,14 +3292,22 @@ const El = {
       for (let i=1;i<=daysInMonth;i++) {
         const dateStr = `${this.calYear}-${String(this.calMonth+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
         const isToday = dateStr===todayStr;
-        const hasEv = eventDates.has(dateStr);
+        const hasEv = eventDates.has(dateStr) || this.recurringOnDate(dateStr).length > 0;
         html += `<div class="cal-day${isToday?' today':''}${hasEv?' has-events':''}" onclick="El.schedule.renderDayEvents('${dateStr}')">${i}</div>`;
       }
       grid.innerHTML = html;
     },
     renderDayEvents(dateStr) {
       const d = El.state.get();
-      const events = d.events.filter(e=>e.date===dateStr).sort((a,b)=>a.time>b.time?1:-1);
+      const manualEvents = d.events.filter(e=>e.date===dateStr).sort((a,b)=>a.time>b.time?1:-1);
+      // Merge recurring expenses as synthetic bill events
+      const recurItems = this.recurringOnDate(dateStr).map(r => ({
+        id: null, _recurringId: r.id, title: r.description,
+        type: 'bill', date: dateStr, time: '09:00',
+        notes: '-' + El.fmt(r.amount) + (r.frequency && r.frequency !== 'monthly' ? ' · ' + r.frequency : ''),
+        gcal_url: null
+      }));
+      const events = [...manualEvents, ...recurItems].sort((a,b)=>a.time>b.time?1:-1);
       const label = new Date(dateStr+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
       const el = document.getElementById('schedule-events');
       if (!el) return;
@@ -3277,14 +3318,20 @@ const El = {
             <div class="event-time">${e.time||'All day'}</div>
             <div style="flex:1"><div class="event-title">${e.title}</div>${e.notes?`<div class="event-sub">${e.notes}</div>`:''}</div>
             ${e.gcal_url?`<a href="${e.gcal_url}" target="_blank" style="font-size:10px;color:var(--primary);text-decoration:none;flex-shrink:0">📅 GCal</a>`:''}
-            <button onclick="El.schedule.removeEvent('${e.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;position:absolute;top:6px;right:8px;font-size:16px">×</button>
+            ${e.id ? `<button onclick="El.schedule.removeEvent('${e.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;position:absolute;top:6px;right:8px;font-size:16px">×</button>` : ''}
           </div>`).join('') : `<div style="text-align:center;padding:16px 0;color:var(--text3);font-size:14px">No events this day</div>`}
       </div>`;
 
-      // Also update all-events list
+      // Also update all-events list (manual + next occurrence of each recurring)
       const allEl = document.getElementById('all-events-list');
       if (!allEl) return;
-      const upcoming = d.events.filter(e=>e.date>=El.today()).sort((a,b)=>a.date>b.date?1:a.date<b.date?-1:a.time>b.time?1:-1).slice(0,10);
+      const today = El.today();
+      const upcomingManual = d.events.filter(e=>e.date>=today).sort((a,b)=>a.date>b.date?1:a.date<b.date?-1:0);
+      const upcomingRecurring = (d.recurring||[]).filter(r=>r.nextDate).map(r=>({
+        id:null, title:r.description, type:'bill', date:r.nextDate,
+        time:'09:00', notes:'-'+El.fmt(r.amount), gcal_url:null
+      }));
+      const upcoming = [...upcomingManual, ...upcomingRecurring].sort((a,b)=>a.date>b.date?1:a.date<b.date?-1:0).slice(0,12);
       allEl.innerHTML = upcoming.length ? upcoming.map(e=>`
         <div class="list-item">
           <div class="list-icon" style="background:${{event:'var(--primary-glow)',bill:'var(--red-glow)',reminder:'rgba(255,159,67,0.15)',goal:'var(--teal-glow)',task:'var(--bg3)'}[e.type]||'var(--bg3)'}">${{event:'📌',bill:'💳',reminder:'🔔',goal:'🎯',task:'✅'}[e.type]||'📌'}</div>
