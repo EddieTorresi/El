@@ -3621,12 +3621,27 @@ const El = {
       if (!this._initialized) {
         this._initialized = true;
         const d = El.state.get();
-        this.addMsg('ai', `Hey ${d.profile.name}! I'm El — your everyday life assistant. Ask me anything, or try telling me about a debt like "I owe $4,500 on my Chase card at 22% APR" or your schedule like "I work out Mon/Wed/Fri at 6am" and I'll offer to add it automatically!`);
+        const saved = d.aiHistory || [];
+        if (saved.length > 0) {
+          this.history = saved.slice();
+          saved.forEach(m => this.addMsg(m.role, m.content));
+        } else {
+          this.addMsg('ai', `Hey ${d.profile.name}! I'm El — your everyday life assistant. Ask me anything, or try telling me about a debt like "I owe $4,500 on my Chase card at 22% APR" or your schedule like "I work out Mon/Wed/Fri at 6am" and I'll offer to add it automatically!`);
+        }
       }
+    },
+    saveHistory() {
+      const d = El.state.get();
+      d.aiHistory = this.history.slice(-40);
+      El.state.save();
     },
     clear() {
       this.history = [];
+      const d = El.state.get();
+      d.aiHistory = [];
+      El.state.save();
       document.getElementById('chat-messages').innerHTML = '';
+      this._initialized = false;
       this.init();
     },
     sendMsg(text) {
@@ -3641,6 +3656,7 @@ const El = {
       input.style.height = 'auto';
       this.addMsg('user', text);
       this.history.push({ role:'user', content:text });
+      this.saveHistory();
       setTimeout(()=>this.respond(text), 600);
     },
     scrollToBottom() {
@@ -4005,6 +4021,7 @@ Do not say data has been saved — say you can add it and wait for confirmation.
           this.hideTyping();
           this.addMsg('ai', '⚠️ <b>AI setup needed:</b> You selected ' + provider + ', but no API key is saved. Go to Settings → El AI Provider, paste your key, Save, then Test Connection.');
           this.history.push({ role:'ai', content:'AI setup needed: missing API key.' });
+          this.saveHistory();
           return;
         }
         try {
@@ -4019,12 +4036,14 @@ Do not say data has been saved — say you can add it and wait for confirmation.
           if (cleanReply) {
             this.addMsg('ai', cleanReply);
             this.history.push({ role:'ai', content:cleanReply });
+            this.saveHistory();
           }
           if (action) this.handleElAction(action);
         } catch(e) {
           this.hideTyping();
           this.addMsg('ai', '⚠️ <b>AI connection error:</b> ' + this.escapeHtml(e.message) + '<br><br>Check Settings → El AI Provider, then tap Test Connection.');
           this.history.push({ role:'ai', content:'API error: ' + e.message });
+          this.saveHistory();
         }
         return;
       }
