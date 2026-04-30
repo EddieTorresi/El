@@ -1170,12 +1170,12 @@ const El = {
         assumptions: { returnRate: 7, inflationRate: 3, taxRate: 22, emergencyMonths: 6, incomeGrowthRate: 2 },
         budget: {
           categories: [
-            { id:'cat1', name:'Housing', allocated:1200, icon:'🏠', color:'#7c6aff' },
-            { id:'cat2', name:'Food', allocated:400, icon:'🛒', color:'#00d4aa' },
-            { id:'cat3', name:'Transport', allocated:300, icon:'🚗', color:'#ff9f43' },
-            { id:'cat4', name:'Utilities', allocated:150, icon:'⚡', color:'#ffd32a' },
-            { id:'cat5', name:'Entertainment', allocated:100, icon:'🎬', color:'#ff4d6d' },
-            { id:'cat6', name:'Healthcare', allocated:100, icon:'💊', color:'#a8ff78' },
+            { id:'cat1', name:'Housing', allocated:0, icon:'🏠', color:'#7c6aff' },
+            { id:'cat2', name:'Food', allocated:0, icon:'🛒', color:'#00d4aa' },
+            { id:'cat3', name:'Transport', allocated:0, icon:'🚗', color:'#ff9f43' },
+            { id:'cat4', name:'Utilities', allocated:0, icon:'⚡', color:'#ffd32a' },
+            { id:'cat5', name:'Entertainment', allocated:0, icon:'🎬', color:'#ff4d6d' },
+            { id:'cat6', name:'Healthcare', allocated:0, icon:'💊', color:'#a8ff78' },
           ],
           transactions: []
         },
@@ -1188,7 +1188,7 @@ const El = {
         macros: { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] },
         paidBills: {},
         netWorthHistory: [],
-        settings: { gcal_client_id: '', gcal_api_key: '', gcal_connected: false, aiProvider: 'builtin', aiApiKey: '', theme: 'dark' }
+        settings: { gcal_client_id: '', gcal_api_key: '', gcal_connected: false, gcalToken: '', aiProvider: 'builtin', aiApiKey: '', theme: 'dark' }
       };
     },
     migrate(data) {
@@ -1311,6 +1311,8 @@ const El = {
     if (demo) {
       const today = El.today();
       const ym = today.substr(0,7);
+      // Restore realistic demo budget allocations (fresh real users start at $0 each)
+      data.budget.categories.forEach((c,i) => { c.allocated = [1200,400,300,150,100,100][i] ?? 0; });
       data.debts = [
         { id:'d1', name:'Chase Freedom', type:'credit_card', balance:4250, apr:24.99, minPayment:85, dueDay:15, originalBalance:5000 },
         { id:'d2', name:'Toyota Camry', type:'auto', balance:18400, apr:6.9, minPayment:385, dueDay:3, originalBalance:22000 }
@@ -1511,6 +1513,7 @@ const El = {
             <textarea class="quick-capture-input" id="quick-capture-input" rows="1" placeholder="Dentist next Thu at 2pm"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();El.ai.quickCapture();}"
               oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,96)+'px'"></textarea>
+            <button class="chat-mic" id="capture-mic-btn" onclick="El.ai.toggleCaptureSpeech()" title="Voice input" style="display:none">🎤</button>
             <button class="quick-capture-send" onclick="El.ai.quickCapture()">+</button>
           </div>
           <div class="quick-capture-chips">
@@ -2338,19 +2341,33 @@ const El = {
         </div>
 
         <div class="settings-section fade-in" id="gcal-setup-section" style="display:none">
-          <div class="settings-title">Google Calendar Setup</div>
+          <div class="settings-title">Google Calendar</div>
           <div class="card">
-            <div style="font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.6">
-              To enable two-way Google Calendar sync:<br>
-              1. Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--primary)">console.cloud.google.com</a><br>
-              2. Create a project → Enable Calendar API<br>
-              3. Create OAuth 2.0 credentials (Web app)<br>
-              4. Add your domain to authorized origins<br>
-              5. Paste your Client ID and API Key below
-            </div>
-            <div class="form-group"><label class="form-label">Client ID</label><input class="form-input" id="gcal-client-id" placeholder="xxxx.apps.googleusercontent.com" value="${d.settings.gcal_client_id||''}"></div>
-            <div class="form-group"><label class="form-label">API Key</label><input class="form-input" id="gcal-api-key" placeholder="AIzaSy..." value="${d.settings.gcal_api_key||''}"></div>
-            <button class="btn btn-teal" onclick="El.settings.connectGcal()">Connect Google Calendar</button>
+            ${d.settings.gcal_connected && d.settings.gcalToken ? `
+              <div style="color:var(--teal);font-weight:600;margin-bottom:10px">✅ Connected via Google OAuth</div>
+              <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5">Events you create in El can be synced to Google Calendar using your connected account.</div>
+              <button class="btn btn-danger" onclick="El.settings.disconnectGcal()">Disconnect Google Calendar</button>
+            ` : !d.settings.gcal_client_id ? `
+              <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
+                Connect with OAuth — no backend required. You'll need a Google OAuth Client ID:<br><br>
+                1. <a href="https://console.cloud.google.com" target="_blank" style="color:var(--primary)">console.cloud.google.com</a> → Create project<br>
+                2. Enable Calendar API<br>
+                3. Credentials → OAuth 2.0 Client ID (Web app)<br>
+                4. Add this page's URL as an authorized JavaScript origin<br>
+                5. Paste the Client ID below
+              </div>
+              <div class="form-group">
+                <label class="form-label">OAuth Client ID</label>
+                <input class="form-input" id="gcal-client-id" placeholder="xxxx.apps.googleusercontent.com" value="">
+              </div>
+              <button class="btn btn-teal" onclick="El.settings.saveGcalClientId()">Save Client ID</button>
+            ` : `
+              <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.5">
+                Client ID saved. Tap below to authorize El via Google OAuth.<br>
+                <span style="cursor:pointer;color:var(--primary);font-size:12px" onclick="El.settings.clearGcalClientId()">Change Client ID</span>
+              </div>
+              <button class="btn btn-teal" onclick="El.settings.startGcalOAuth()">Connect Google Calendar via OAuth</button>
+            `}
           </div>
         </div>
 
@@ -3715,6 +3732,69 @@ const El = {
       try { sr.start(); }
       catch(e) { this.addMsg('ai', '🎤 Could not start microphone: ' + e.message); }
     },
+    _captureSpeech: null,
+    toggleCaptureSpeech() {
+      const btn = document.getElementById('capture-mic-btn');
+      const input = document.getElementById('quick-capture-input');
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        if (btn) btn.style.display = 'none';
+        return;
+      }
+      // If already recording, stop
+      if (this._captureSpeech) {
+        this._captureSpeech.stop();
+        return;
+      }
+      const sr = new SpeechRecognition();
+      sr.lang = 'en-US';
+      sr.continuous = false;
+      sr.interimResults = true;
+      sr.maxAlternatives = 1;
+      const existingText = input ? input.value.trim() : '';
+      let finalTranscript = '';
+      sr.onstart = () => {
+        this._captureSpeech = sr;
+        if (btn) { btn.classList.add('recording'); btn.title = 'Tap to stop'; }
+        if (input) input.placeholder = 'Listening…';
+      };
+      sr.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) { finalTranscript += t; }
+          else { interim = t; }
+        }
+        if (input) {
+          input.value = (existingText ? existingText + ' ' : '') + (finalTranscript || interim);
+          input.style.height = 'auto';
+          input.style.height = Math.min(input.scrollHeight, 96) + 'px';
+        }
+      };
+      sr.onerror = (e) => {
+        const msgs = {
+          'not-allowed': 'Microphone permission was denied. Allow mic access in Settings, then reload.',
+          'no-speech': 'No speech detected. Try speaking closer to the mic.',
+          'network': 'Network error during transcription.',
+        };
+        if (e.error !== 'aborted') {
+          El.ui.showToast('🎤 ' + (msgs[e.error] || 'Speech error: ' + e.error));
+        }
+      };
+      sr.onend = () => {
+        this._captureSpeech = null;
+        if (btn) { btn.classList.remove('recording'); btn.title = 'Voice input'; }
+        if (input) {
+          input.placeholder = 'Dentist next Thu at 2pm';
+          if (!finalTranscript && !input.value.trim()) input.value = existingText;
+          input.style.height = 'auto';
+          if (input.value) input.style.height = Math.min(input.scrollHeight, 96) + 'px';
+          input.focus();
+        }
+      };
+      try { sr.start(); }
+      catch(e) { El.ui.showToast('🎤 Could not start microphone: ' + e.message); }
+    },
     _initialized: false,
     init() {
       const suggestions = [
@@ -3849,12 +3929,21 @@ const El = {
     stripElActions(text) {
       return String(text || '').replace(/\[\[EL_ACTION:[\s\S]*?\]\]/g, '').trim();
     },
-    extractElAction(text) {
+    extractElActions(text) {
       const raw = String(text || '');
-      const m = raw.match(/\[\[EL_ACTION:([\s\S]*?)\]\]/);
-      if (!m) return null;
-      try { return JSON.parse(m[1].trim()); }
-      catch(e) { return { type:'parse_error', error:e.message, raw:m[1] }; }
+      const results = [];
+      const re = /\[\[EL_ACTION:([\s\S]*?)\]\]/g;
+      let m;
+      while ((m = re.exec(raw)) !== null) {
+        try { results.push(JSON.parse(m[1].trim())); }
+        catch(e) { results.push({ type:'parse_error', error:e.message, raw:m[1] }); }
+      }
+      return results;
+    },
+    extractElAction(text) {
+      // Returns the first action only — use extractElActions() to get all of them
+      const all = this.extractElActions(text);
+      return all.length ? all[0] : null;
     },
     normalizeFrequency(freq) {
       const f = String(freq || 'monthly').toLowerCase().replace(/[\s_-]+/g, ' ').trim();
@@ -4086,7 +4175,7 @@ Today's nutrition:
 - Remaining: ${Math.max(0,macroGoals.calories-mt.cal)} cal / ${Math.max(0,macroGoals.protein-mt.p)}g protein
 ${goalPlan ? '- Active fitness goal: '+goalPlan.goal : ''}
 
-FUNCTION CALLS — CRITICAL: Whenever the user mentions ANY of the following, you MUST silently append an [[EL_ACTION:...]] JSON block on its own line at the very end of your reply. Triggers:
+FUNCTION CALLS — CRITICAL: Whenever the user mentions ANY of the following, you MUST silently append [[EL_ACTION:...]] JSON block(s) on their own line(s) at the very end of your reply. Triggers:
 • A purchase, expense, or payment ("I spent", "I bought", "paid for", "cost me", "$X on Y")
 • Income or pay ("I make", "I earn", "I get paid", "my salary is", "paycheck", "I bring home")
 • A debt or loan ("I owe", "credit card balance", "car loan", "student loan", "balance of")
@@ -4095,7 +4184,10 @@ FUNCTION CALLS — CRITICAL: Whenever the user mentions ANY of the following, yo
 • Food eaten or a meal (any food/drink with an amount or portion)
 • A workout or exercise session completed
 
-Format — put this EXACTLY at the end of your reply, on its own line, with no explanation:
+MULTIPLE ITEMS — CRITICAL: If the user mentions MORE THAN ONE item to add (e.g. two income sources, multiple debts, an expense and an event), you MUST emit a SEPARATE [[EL_ACTION:...]] block for EACH item. Each block on its own line at the end.
+Example: "I get paid $3924 monthly and $2924 biweekly" → TWO separate income blocks, one monthly and one biweekly.
+
+Format — put these EXACTLY at the end of your reply, each on its own line, with no explanation:
 [[EL_ACTION:{"type":"transaction","data":{"description":"groceries","amount":50,"transactionType":"expense","category":"food","date":"${El.today()}"}}]]
 
 Types and required fields:
@@ -4107,9 +4199,15 @@ Types and required fields:
 • log_food: name, calories (estimate if not given), protein, carbs, fat
 • log_workout: name, exercises:[{name, sets, reps, weight}]
 
-PAYDAY RULE: If user mentions a pay amount AND last pay date, include lastPayDate in the income action.
+FREQUENCY RULES — parse these phrases exactly:
+• "every month" / "monthly" / "once a month" / "on the 1st/15th" → frequency: "monthly"
+• "bi weekly" / "biweekly" / "every 2 weeks" / "every other week" → frequency: "biweekly"
+• "every week" / "weekly" / "once a week" → frequency: "weekly"
+• "every year" / "annually" / "once a year" → frequency: "yearly"
+
+PAYDAY RULE: If user mentions a pay amount AND a start/last pay date, include lastPayDate in the income action.
 ESTIMATE: For food, always estimate calories/macros from the portion even if user doesn't specify.
-DO NOT say you've saved or added anything — the app shows a confirmation card automatically. Do NOT mention or explain the [[EL_ACTION:...]] block. Just include it silently.
+DO NOT say you've saved or added anything — the app shows a confirmation card automatically. Do NOT mention or explain the [[EL_ACTION:...]] blocks. Just include them silently.
 Use **bold** for key numbers.`;
     },
     async callClaude(apiKey, systemPrompt, userMessage) {
@@ -4176,24 +4274,23 @@ Use **bold** for key numbers.`;
           let rawReply = provider === 'claude'
             ? await this.callClaude(apiKey, systemPrompt, text)
             : await this.callOpenAI(apiKey, systemPrompt, text);
-          const action = this.extractElAction(rawReply);
+          const actions = this.extractElActions(rawReply);
           let cleanReply = this.stripElActions(rawReply);
           cleanReply = cleanReply.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
           this.hideTyping();
-          // If an action was detected, handleElAction will show its own confirmation card.
-          // Only show cleanReply if it contains more than a generic "I'll add that" phrase,
-          // i.e. show it always but don't duplicate the "confirm/cancel" UI — handleElAction handles that.
           if (cleanReply) {
             this.addMsg('ai', cleanReply);
             this.history.push({ role:'ai', content:cleanReply });
             this.saveHistory();
           }
-          if (action && action.type !== 'parse_error') {
-            this.handleElAction(action);
-          } else if (action && action.type === 'parse_error') {
-            // Malformed action JSON — log to console but don't crash
-            console.warn('[El] Failed to parse EL_ACTION:', action.raw, action.error);
-          }
+          // Execute all detected actions (supports multiple [[EL_ACTION:...]] blocks in one reply)
+          actions.forEach(action => {
+            if (action.type !== 'parse_error') {
+              this.handleElAction(action);
+            } else {
+              console.warn('[El] Failed to parse EL_ACTION:', action.raw, action.error);
+            }
+          });
         } catch(e) {
           this.hideTyping();
           this.addMsg('ai', '⚠️ <b>AI connection error:</b> ' + this.escapeHtml(e.message) + '<br><br>Check Settings → El AI Provider, then tap Test Connection.');
@@ -4888,19 +4985,52 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
     },
     showGcal() {
       const el = document.getElementById('gcal-setup-section');
-      if (el) el.style.display = el.style.display==='none'?'block':'none';
+      if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
     },
-    connectGcal() {
-      const clientId = document.getElementById('gcal-client-id').value.trim();
-      const apiKey = document.getElementById('gcal-api-key').value.trim();
-      if (!clientId || !apiKey) { alert('Enter both Client ID and API Key'); return; }
+    saveGcalClientId() {
+      const clientId = (document.getElementById('gcal-client-id')?.value || '').trim();
+      if (!clientId) { alert('Paste your OAuth Client ID first.'); return; }
       const d = El.state.get();
       d.settings.gcal_client_id = clientId;
-      d.settings.gcal_api_key = apiKey;
-      d.settings.gcal_connected = true;
       El.state.save();
-      alert('Google Calendar connected! Your events will now sync.');
       El.render.settings();
+      setTimeout(() => { const el = document.getElementById('gcal-setup-section'); if (el) el.style.display = 'block'; }, 50);
+    },
+    clearGcalClientId() {
+      if (!confirm('Remove the saved Client ID?')) return;
+      const d = El.state.get();
+      d.settings.gcal_client_id = '';
+      El.state.save();
+      El.render.settings();
+      setTimeout(() => { const el = document.getElementById('gcal-setup-section'); if (el) el.style.display = 'block'; }, 50);
+    },
+    startGcalOAuth() {
+      const d = El.state.get();
+      const clientId = d.settings.gcal_client_id;
+      if (!clientId) { alert('No Client ID saved. Enter your OAuth Client ID first.'); return; }
+      const redirectUri = window.location.origin + window.location.pathname;
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'token',
+        scope: 'https://www.googleapis.com/auth/calendar.events',
+        include_granted_scopes: 'true',
+        state: 'gcal_oauth'
+      });
+      window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+    },
+    disconnectGcal() {
+      if (!confirm('Disconnect Google Calendar?')) return;
+      const d = El.state.get();
+      d.settings.gcal_connected = false;
+      d.settings.gcalToken = '';
+      El.state.save();
+      El.render.settings();
+      setTimeout(() => { const el = document.getElementById('gcal-setup-section'); if (el) el.style.display = 'block'; }, 50);
+    },
+    connectGcal() {
+      // Legacy shim — now replaced by OAuth flow
+      this.saveGcalClientId();
     },
     exportData() {
       const data = JSON.stringify(El.state.get(), null, 2);
@@ -5253,12 +5383,43 @@ window.ElDebug = () => ({ hasEl: !!window.El, data: El.state.get(), current: El.
 
 // ── BOOT ───────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // Google Calendar OAuth implicit flow — capture access_token on redirect back
+  if (window.location.hash && window.location.hash.includes('access_token')) {
+    try {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const token = params.get('access_token');
+      const state = params.get('state');
+      if (token && state === 'gcal_oauth') {
+        const existing = El.state.load();
+        if (existing) {
+          if (!existing.settings) existing.settings = {};
+          existing.settings.gcalToken = token;
+          existing.settings.gcal_connected = true;
+          El.state._data = existing;
+          El.state.save();
+        }
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    } catch(e) { console.warn('[El] GCal OAuth parse error:', e); }
+  }
+  // Show capture mic button only if Speech API is supported
+  if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+    const captureMic = document.getElementById('capture-mic-btn');
+    if (captureMic) captureMic.style.display = '';
+  }
   const data = El.state.load();
   if (data && data.profile && data.profile.name) {
     document.getElementById('onboarding').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    try { El.init(); }
-    catch(e) {
+    try {
+      El.init();
+      // If we just returned from GCal OAuth, show confirmation toast
+      if (data.settings && data.settings.gcal_connected && data.settings.gcalToken &&
+          !sessionStorage.getItem('gcal_toast_shown')) {
+        sessionStorage.setItem('gcal_toast_shown', '1');
+        setTimeout(() => El.ui.showToast('✅ Google Calendar connected!'), 800);
+      }
+    } catch(e) {
       console.error('El boot failed', e);
       const home = document.getElementById('screen-home');
       if (home) home.innerHTML = '<div class="page-header"><div class="page-title">El</div></div><div class="card"><div class="card-title">Safe Mode</div><div style="margin-top:10px;color:var(--text2);line-height:1.5">El loaded, but one module failed during startup. Clear site data or send the console error.</div></div>';
