@@ -1,0 +1,7 @@
+# Codex sandbox temp files
+.codex-temp-index*
+.codex-objects-*/
+
+# OS
+.DS_Store
+Thumbs.db
