@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29 ai-nav-fix-v1 -->
+<!-- El fix build: 2026-04-29 bug-fixes-v2 recurring-calendar modal-label swipe-dismiss ai-autoaction -->
 <link rel="manifest" href='data:application/manifest+json,{"name":"El — Everyday Life","short_name":"El","display":"standalone","background_color":"%230d0d18","theme_color":"%230d0d18","start_url":"/","orientation":"portrait","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns='http%3A//www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230d0d18'/%3E%3Ctext x='50%25' y='55%25' font-size='110' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' fill='%237c6aff'%3E✦%3C/text%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"}]}'>
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230d0d18'/%3E%3Ctext x='50%25' y='55%25' font-size='110' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' fill='%237c6aff'%3E✦%3C/text%3E%3C/svg%3E">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2280,6 +2280,8 @@ const El = {
         document.getElementById('txn-category').innerHTML = catOptions;
         const cb = document.getElementById('txn-recurring');
         if (cb) { cb.checked = false; document.getElementById('txn-freq-group').style.display='none'; }
+        // Always reset to expense mode so label/category are correct on every open
+        this.setTxnType('expense');
       }
       if (id==='modal-edit-transaction') {
         document.getElementById('edit-txn-category').innerHTML = catOptions;
@@ -2300,34 +2302,36 @@ const El = {
         modal._swipeInit = true;
         const overlay = modal.closest('.modal-overlay');
         if (!overlay) return;
-        let sy = 0, dy = 0, dragging = false;
-        // Attach to the handle area (top 56px of modal) for swipe-to-dismiss
+        let sy = 0, dy = 0, dragging = false, startScrollTop = 0;
+        // Allow swipe-to-dismiss from anywhere on the modal when scrolled to top
         modal.addEventListener('touchstart', e => {
-          const touchY = e.touches[0].clientY;
-          const modalTop = modal.getBoundingClientRect().top;
-          // Only initiate swipe if touch starts in the top 56px (handle zone)
-          if (touchY - modalTop > 56) return;
-          dragging = true;
-          sy = touchY; dy = 0;
+          sy = e.touches[0].clientY;
+          dy = 0;
+          dragging = false;
+          startScrollTop = modal.scrollTop;
           modal.style.transition = 'none';
         }, { passive: true });
         modal.addEventListener('touchmove', e => {
+          const currentDy = e.touches[0].clientY - sy;
+          // Start dismiss only when dragging DOWN and modal is scrolled to the very top
+          if (!dragging && currentDy > 10 && startScrollTop <= 1) {
+            dragging = true;
+          }
           if (!dragging) return;
-          dy = Math.max(0, e.touches[0].clientY - sy);
+          dy = Math.max(0, currentDy);
           modal.style.transform = 'translateY(' + dy + 'px)';
-        }, { passive: true });
+          if (dy > 0) e.preventDefault();
+        }, { passive: false });
         modal.addEventListener('touchend', () => {
-          if (!dragging) return;
-          dragging = false;
           modal.style.transition = 'transform 0.22s ease';
-          if (dy > 60) {
+          if (dragging && dy > 60) {
             modal.style.transform = 'translateY(110%)';
             setTimeout(() => { modal.style.transform = ''; modal.style.transition = ''; overlay.classList.remove('open'); }, 220);
           } else {
             modal.style.transform = '';
             setTimeout(() => { modal.style.transition = ''; }, 220);
           }
-          dy = 0;
+          dragging = false; dy = 0;
         });
       });
     },
@@ -2926,6 +2930,8 @@ const El = {
       El.state.save();
       El.ui.closeModal('modal-add-recurring');
       El.render.financeTab('budget');
+      // Refresh calendar if currently visible so the new recurring expense shows
+      if (El.nav.current === 'schedule') El.schedule.renderCalendar();
     },
     processRecurring() {
       // Auto-post recurring expenses if their nextDate is today or past and not already posted this cycle
@@ -3957,13 +3963,31 @@ Today's nutrition:
 - Remaining: ${Math.max(0,macroGoals.calories-mt.cal)} cal / ${Math.max(0,macroGoals.protein-mt.p)}g protein
 ${goalPlan ? '- Active fitness goal: '+goalPlan.goal : ''}
 
-DATA ENTRY — If the user asks to add/save/log something, include ONE hidden action block at the very end:
-[[EL_ACTION:{"type":"income|transaction|debt|savings|event|events|log_food|log_workout","data":{...}}]]
-Fields: income(name,amount,frequency,lastPayDate YYYY-MM-DD), transaction(description,amount,category,date,transactionType), debt(name,balance,apr,minPayment,dueDay,debtType), savings(name,target,current,monthly,rate), event(title,date,time,notes), log_food(name,calories,protein,carbs,fat — estimate from portion if needed), log_workout(name,exercises:[{name,sets,reps,weight,unit}])
+FUNCTION CALLS — CRITICAL: Whenever the user mentions ANY of the following, you MUST silently append an [[EL_ACTION:...]] JSON block on its own line at the very end of your reply. Triggers:
+• A purchase, expense, or payment ("I spent", "I bought", "paid for", "cost me", "$X on Y")
+• Income or pay ("I make", "I earn", "I get paid", "my salary is", "paycheck", "I bring home")
+• A debt or loan ("I owe", "credit card balance", "car loan", "student loan", "balance of")
+• A savings goal ("saving up for", "want to save", "saving $X for")
+• A calendar event, appointment, task, or reminder (any future date + activity)
+• Food eaten or a meal (any food/drink with an amount or portion)
+• A workout or exercise session completed
 
-PAYDAY RULE: If user mentions a pay amount AND last pay date, include lastPayDate in the income action so El can calculate upcoming paycheck dates.
+Format — put this EXACTLY at the end of your reply, on its own line, with no explanation:
+[[EL_ACTION:{"type":"transaction","data":{"description":"groceries","amount":50,"transactionType":"expense","category":"food","date":"${new Date().toISOString().split('T')[0]}"}}]]
 
-Do not say data has been saved — say you can add it and wait for confirmation. Do not explain the JSON. Use **bold** for key numbers.`;
+Types and required fields:
+• transaction: description, amount, transactionType (expense|income), category, date (YYYY-MM-DD)
+• income: name, amount, frequency (weekly|biweekly|monthly|yearly), lastPayDate (YYYY-MM-DD if mentioned)
+• debt: name, balance, apr, minPayment, debtType (credit_card|auto|student|mortgage|personal)
+• savings: name, target, current (0 if unknown), monthly (0 if unknown)
+• event: title, date (YYYY-MM-DD), time (HH:MM or ""), notes
+• log_food: name, calories (estimate if not given), protein, carbs, fat
+• log_workout: name, exercises:[{name, sets, reps, weight}]
+
+PAYDAY RULE: If user mentions a pay amount AND last pay date, include lastPayDate in the income action.
+ESTIMATE: For food, always estimate calories/macros from the portion even if user doesn't specify.
+DO NOT say you've saved or added anything — the app shows a confirmation card automatically. Do NOT mention or explain the [[EL_ACTION:...]] block. Just include it silently.
+Use **bold** for key numbers.`;
     },
     async callClaude(apiKey, systemPrompt, userMessage) {
       // history.slice(-9,-1) = last 8 messages EXCLUDING the one just pushed (current user msg)
@@ -4033,12 +4057,20 @@ Do not say data has been saved — say you can add it and wait for confirmation.
           let cleanReply = this.stripElActions(rawReply);
           cleanReply = cleanReply.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
           this.hideTyping();
+          // If an action was detected, handleElAction will show its own confirmation card.
+          // Only show cleanReply if it contains more than a generic "I'll add that" phrase,
+          // i.e. show it always but don't duplicate the "confirm/cancel" UI — handleElAction handles that.
           if (cleanReply) {
             this.addMsg('ai', cleanReply);
             this.history.push({ role:'ai', content:cleanReply });
             this.saveHistory();
           }
-          if (action) this.handleElAction(action);
+          if (action && action.type !== 'parse_error') {
+            this.handleElAction(action);
+          } else if (action && action.type === 'parse_error') {
+            // Malformed action JSON — log to console but don't crash
+            console.warn('[El] Failed to parse EL_ACTION:', action.raw, action.error);
+          }
         } catch(e) {
           this.hideTyping();
           this.addMsg('ai', '⚠️ <b>AI connection error:</b> ' + this.escapeHtml(e.message) + '<br><br>Check Settings → El AI Provider, then tap Test Connection.');
@@ -4968,62 +5000,4 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       const tpl = this._activeTemplate;
       let totalSets = 0;
       tpl.exercises.forEach(function(ex, ei) {
-        for (let si = 0; si < ex.sets; si++) {
-          const doneBtn = document.getElementById('w-done-' + ei + '-' + si);
-          if (doneBtn && doneBtn.classList.contains('done')) totalSets++;
-        }
-      });
-      const d = El.state.get();
-      if (!d.workouts) d.workouts = { templates: [], log: [] };
-      d.workouts.log.push({
-        id: El.uid(), name: tpl.name, date: El.today(),
-        sets: totalSets, exercises: tpl.exercises.length
-      });
-      El.state.save();
-      this._activeTemplate = null;
-      El.ui.closeModal('modal-log-workout');
-      El.haptic('success');
-      El.render.fitness();
-      El.fitness.showTab('workouts');
-    }
-  }
-};
-window.El = El;
-
-// ── BOOT ───────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  const data = El.state.load();
-  if (data && data.profile && data.profile.name) {
-    document.getElementById('onboarding').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
-    El.init();
-  }
-  // Prevent pull-to-refresh on mobile
-  document.body.addEventListener('touchmove', e=>{ if(e.touches.length>1) e.preventDefault(); }, { passive:false });
-});
-</script>
-
-<script>
-// Inline service worker for offline support
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  const swCode = `
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open('el-v1').then(c => c.addAll([location.href||'/'])).catch(()=>{}));
-  self.skipWaiting();
-});
-self.addEventListener('activate', e => { self.clients.claim(); });
-self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-    if (res.ok) { const clone = res.clone(); caches.open('el-v1').then(c=>c.put(e.request,clone)); }
-    return res;
-  }).catch(() => caches.match(e.request))));
-});
-  `;
-  const blob = new Blob([swCode], { type: 'application/javascript' });
-  const swUrl = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl, { scope: '/' }).catch(() => {});
-}
-</script>
-</body>
-</html>
+        for (let si = 0; s
