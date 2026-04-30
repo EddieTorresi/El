@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29-bug-fixes-v4 token-optimization auto-model-routing latest-models set-budget-action ok-to-buy -->
+<!-- El fix build: 2026-04-29-bug-fixes-v6 budget-edit-tap clear-allocations auto-model-migration -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-04-29-bug-fixes-v4';</script>
+<script>window.EL_BUILD = '2026-04-29-bug-fixes-v6';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -1290,7 +1290,8 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
 <div class="modal-overlay" id="modal-budget-cat" onclick="if(event.target===this)El.ui.closeModal('modal-budget-cat')">
   <div class="modal">
     <div class="modal-handle"></div>
-    <div class="modal-title">Budget Category</div>
+    <div class="modal-title" id="cat-modal-title">Budget Category</div>
+    <input type="hidden" id="cat-edit-id" value="">
     <div class="form-group">
       <label class="form-label">Category Name</label>
       <input class="form-input" id="cat-name" placeholder="e.g. Groceries, Rent">
@@ -1305,7 +1306,10 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
         <input class="form-input" id="cat-icon" placeholder="🛒" maxlength="2">
       </div>
     </div>
-    <button class="btn btn-primary" onclick="El.finance.addCategory()">Add Category</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" id="cat-save-btn" onclick="El.finance.saveCategory()" style="flex:1">Save Category</button>
+      <button class="btn btn-danger" id="cat-delete-btn" onclick="El.finance.deleteCategoryFromModal()" style="display:none">Delete</button>
+    </div>
   </div>
 </div>
 
@@ -1392,6 +1396,18 @@ const El = {
       out.paidBills = isObj(out.paidBills) ? out.paidBills : {};
       out.netWorthHistory = Array.isArray(out.netWorthHistory) ? out.netWorthHistory : [];
       out.settings = merge(base.settings, out.settings || {});
+
+      // v4 migration: flip pre-v4 model picks to 'auto' so existing users see
+      // Auto as their default. Detection: aiOpenAiModel did not exist before
+      // v4, so its absence means the user hasn't visited v4 Settings yet.
+      if (out.settings && out.settings.aiOpenAiModel === undefined) {
+        const legacy = ['claude-sonnet-4-6','claude-sonnet-4-5','claude-3-5-sonnet-20241022','claude-3-5-haiku-20241022'];
+        if (!out.settings.aiClaudeModel || legacy.includes(out.settings.aiClaudeModel)) {
+          out.settings.aiClaudeModel = 'auto';
+        }
+        out.settings.aiOpenAiModel = 'auto';
+      }
+
       return out;
     },
     load() {
@@ -1908,15 +1924,19 @@ const El = {
           <div class="card">
             <div class="card-header">
               <div class="card-title">Categories</div>
-              <button class="card-action" onclick="El.ui.openModal('modal-budget-cat')">+ Add</button>
+              <div style="display:flex;gap:6px;align-items:center">
+                ${(d.budget.categories||[]).some(c=>c.allocated>0) ? `<button class="card-action" onclick="El.finance.clearAllAllocations()" style="background:rgba(255,77,109,0.08);color:var(--red);border-color:rgba(255,77,109,0.25)">Reset all</button>` : ''}
+                <button class="card-action" onclick="El.finance.openCategoryAdd()">+ Add</button>
+              </div>
             </div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Tap a category to set or change its monthly budget.</div>
             ${d.budget.categories.map(c=>{
               const spent = spentBycat[c.id]||0;
               const pct = c.allocated>0?Math.min(100,(spent/c.allocated)*100):0;
-              return `<div style="margin-bottom:14px">
+              return `<div style="margin-bottom:14px;cursor:pointer" onclick="El.finance.openCategoryEdit('${c.id}')">
                 <div style="display:flex;justify-content:space-between;margin-bottom:6px">
                   <div style="display:flex;align-items:center;gap:8px"><span>${c.icon}</span><span style="font-weight:600">${c.name}</span></div>
-                  <div style="font-size:13px;color:var(--text2)">${El.fmt(spent)} / ${El.fmt(c.allocated)}</div>
+                  <div style="font-size:13px;color:var(--text2)">${c.allocated>0?El.fmt(spent)+' / '+El.fmt(c.allocated):'<span style="color:var(--text3)">tap to set budget</span>'}</div>
                 </div>
                 <div class="progress-wrap"><div class="progress-bar" style="width:${pct}%;background:${pct>90?'var(--red)':pct>70?'var(--orange)':c.color}"></div></div>
               </div>`;
@@ -2730,6 +2750,17 @@ const El = {
       if (id==='modal-add-event') {
         document.getElementById('event-date').value = El.today();
         document.getElementById('event-time').value = '09:00';
+      }
+      if (id==='modal-budget-cat') {
+        const editIdEl = document.getElementById('cat-edit-id');
+        if (editIdEl && !editIdEl.value) {
+          document.getElementById('cat-name').value = '';
+          document.getElementById('cat-budget').value = '';
+          document.getElementById('cat-icon').value = '';
+          const t = document.getElementById('cat-modal-title'); if (t) t.textContent = 'New Category';
+          const sb = document.getElementById('cat-save-btn'); if (sb) sb.textContent = 'Add Category';
+          const db = document.getElementById('cat-delete-btn'); if (db) db.style.display = 'none';
+        }
       }
     },
     closeModal(id) { document.getElementById(id).classList.remove('open'); },
@@ -3915,16 +3946,76 @@ const El = {
       El.state.save();
       El.render.financeTab('savings');
     },
-    addCategory() {
+    // Dual-mode save: edits an existing category if cat-edit-id is set,
+    // otherwise adds a new one. addCategory() alias kept for backwards compat.
+    saveCategory() {
       const name = document.getElementById('cat-name').value.trim();
-      const budget = parseFloat(document.getElementById('cat-budget').value)||0;
-      const icon = document.getElementById('cat-icon').value||'📌';
+      const budget = parseFloat(document.getElementById('cat-budget').value) || 0;
+      const icon = document.getElementById('cat-icon').value || '📌';
+      const editId = document.getElementById('cat-edit-id').value || '';
       if (!name) { alert('Enter a category name'); return; }
       const d = El.state.get();
-      const colors = ['#7c6aff','#00d4aa','#ff9f43','#ffd32a','#ff4d6d','#a8ff78','#74b9ff','#fd79a8'];
-      d.budget.categories.push({ id:El.uid(), name, allocated:budget, icon, color:colors[d.budget.categories.length%colors.length] });
+      if (editId) {
+        const cat = d.budget.categories.find(c => c.id === editId);
+        if (cat) { cat.name = name; cat.allocated = budget; cat.icon = icon; }
+      } else {
+        const colors = ['#7c6aff','#00d4aa','#ff9f43','#ffd32a','#ff4d6d','#a8ff78','#74b9ff','#fd79a8'];
+        d.budget.categories.push({
+          id: El.uid(), name, allocated: budget, icon,
+          color: colors[d.budget.categories.length % colors.length]
+        });
+      }
       El.state.save();
       El.ui.closeModal('modal-budget-cat');
+      El.haptic('success');
+      El.render.financeTab('budget');
+    },
+    addCategory() { return this.saveCategory(); },
+
+    openCategoryEdit(id) {
+      const d = El.state.get();
+      const cat = (d.budget.categories || []).find(c => c.id === id);
+      if (!cat) return;
+      document.getElementById('cat-edit-id').value = cat.id;
+      document.getElementById('cat-name').value = cat.name;
+      document.getElementById('cat-budget').value = cat.allocated || 0;
+      document.getElementById('cat-icon').value = cat.icon || '';
+      document.getElementById('cat-modal-title').textContent = 'Edit ' + cat.name;
+      document.getElementById('cat-save-btn').textContent = 'Save Changes';
+      document.getElementById('cat-delete-btn').style.display = 'inline-flex';
+      El.ui.openModal('modal-budget-cat');
+    },
+
+    openCategoryAdd() {
+      document.getElementById('cat-edit-id').value = '';
+      document.getElementById('cat-name').value = '';
+      document.getElementById('cat-budget').value = '';
+      document.getElementById('cat-icon').value = '';
+      document.getElementById('cat-modal-title').textContent = 'New Category';
+      document.getElementById('cat-save-btn').textContent = 'Add Category';
+      document.getElementById('cat-delete-btn').style.display = 'none';
+      El.ui.openModal('modal-budget-cat');
+    },
+
+    deleteCategoryFromModal() {
+      const id = document.getElementById('cat-edit-id').value || '';
+      if (!id) return;
+      if (!confirm('Delete this category? Transactions will show as "Uncategorized".')) return;
+      const d = El.state.get();
+      d.budget.categories = d.budget.categories.filter(c => c.id !== id);
+      El.state.save();
+      El.ui.closeModal('modal-budget-cat');
+      El.haptic('success');
+      El.render.financeTab('budget');
+    },
+
+    clearAllAllocations() {
+      if (!confirm('Reset every category budget to $0? This does not delete categories or transactions.')) return;
+      const d = El.state.get();
+      (d.budget.categories || []).forEach(c => { c.allocated = 0; });
+      El.state.save();
+      El.haptic('success');
+      El.ui.showToast('All category budgets reset to $0', 'success');
       El.render.financeTab('budget');
     },
     initSwipeHandlers() {
