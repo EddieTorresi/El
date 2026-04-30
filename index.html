@@ -252,6 +252,11 @@ body.light-mode {
   --bg: #f2f2f7; --bg2: #ffffff; --bg3: #e5e5ea; --card: #ffffff; --card2: #f9f9fb;
   --border: #c6c6c8; --text: #1c1c1e; --text2: #636366; --text3: #aeaeb2;
   --shadow: 0 4px 24px rgba(0,0,0,0.10);
+  --glass-bg: rgba(255,255,255,0.6);
+  --glass-bg-strong: rgba(255,255,255,0.8);
+  --glass-border: rgba(0,0,0,0.08);
+  --glass-border-glow: rgba(0,0,0,0.12);
+  --glass-glow: 0 4px 24px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.9);
 }
 body.light-mode nav { background: rgba(255,255,255,0.88); border-color: rgba(0,0,0,0.1); }
 body.light-mode .chat-input-bar { background: rgba(255,255,255,0.92); border-top-color: var(--border); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
@@ -265,7 +270,6 @@ body::before {
   width: 65vw; height: 65vw;
   background: radial-gradient(ellipse at center, rgba(124,106,255,0.13) 0%, transparent 68%);
   border-radius: 50%;
-  animation: orb-drift-a 18s ease-in-out infinite alternate;
 }
 body::after {
   content: ''; position: fixed; pointer-events: none; z-index: 0;
@@ -273,7 +277,6 @@ body::after {
   width: 58vw; height: 58vw;
   background: radial-gradient(ellipse at center, rgba(0,212,170,0.09) 0%, transparent 68%);
   border-radius: 50%;
-  animation: orb-drift-b 22s ease-in-out infinite alternate;
 }
 @keyframes orb-drift-a {
   from { transform: translate(0,0) scale(1); }
@@ -282,6 +285,10 @@ body::after {
 @keyframes orb-drift-b {
   from { transform: translate(0,0) scale(1); }
   to   { transform: translate(-5%,-3%) scale(1.06); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  body::before { animation: orb-drift-a 18s ease-in-out infinite alternate; }
+  body::after  { animation: orb-drift-b 22s ease-in-out infinite alternate; }
 }
 
 #app { height: 100vh; display: flex; flex-direction: column; max-width: 480px; margin: 0 auto; position: relative; z-index: 1; }
@@ -1776,6 +1783,11 @@ const El = {
         </div>
       `;
       El.ui.drawHealthRing(score, scoreColor);
+      // Reveal mic button now that Home HTML exists
+      if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+        const micBtn = document.getElementById('capture-mic-btn');
+        if (micBtn) micBtn.style.display = 'flex';
+      }
     },
 
     finance() {
@@ -2490,7 +2502,7 @@ const El = {
           <div class="card">
             ${d.settings.gcal_connected && d.settings.gcalToken ? `
               <div style="color:var(--teal);font-weight:600;margin-bottom:10px">✅ Connected via Google OAuth</div>
-              <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5">Events you create in El can be synced to Google Calendar using your connected account.</div>
+              <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5">Events you create in El can be added to Google Calendar using your connected account.</div>
               <button class="btn btn-danger" onclick="El.settings.disconnectGcal()">Disconnect Google Calendar</button>
             ` : !d.settings.gcal_client_id ? `
               <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
@@ -3010,6 +3022,34 @@ const El = {
           🎯 Saving ${El.fmt(monthly)}/month at ${rate}%, you'll reach <strong>${El.fmt(target)}</strong> by <strong>${dateFor(mBase)}</strong>.
           ${monthly < target*0.1 ? `<br><br>💡 ${El.fmt(monthly*1.5)}/month instead saves ${fmt(Math.round(mBase*0.25))} on your timeline.` : ''}
         </div>`;
+    },
+
+    showToast(msg, type = 'info', duration = 3000) {
+      const color = type === 'success' ? 'var(--teal)' : type === 'error' ? 'var(--red)' : 'var(--primary)';
+      const toast = document.createElement('div');
+      toast.style.cssText = [
+        'position:fixed','bottom:calc(var(--nav-h,64px) + 24px)','left:50%',
+        'transform:translateX(-50%) translateY(12px)',
+        'background:var(--glass-bg-strong,rgba(30,30,40,0.92))',
+        'border:1px solid var(--glass-border,rgba(255,255,255,0.10))',
+        'backdrop-filter:var(--glass-blur,blur(20px))','-webkit-backdrop-filter:var(--glass-blur,blur(20px))',
+        'color:'+color,'font-size:14px','font-weight:600',
+        'padding:10px 20px','border-radius:24px',
+        'box-shadow:var(--glass-glow,0 8px 32px rgba(0,0,0,0.4))',
+        'z-index:99999','pointer-events:none','white-space:nowrap',
+        'opacity:0','transition:opacity 0.2s ease, transform 0.2s ease'
+      ].join(';');
+      toast.textContent = msg;
+      document.body.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateX(-50%) translateY(0)';
+      });
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(8px)';
+        setTimeout(() => toast.remove(), 250);
+      }, duration);
     }
   },
 
@@ -3624,20 +3664,59 @@ const El = {
       document.getElementById('event-title').value='';
       document.getElementById('event-notes').value='';
     },
-    addToGoogleCalendar() {
+    async addToGoogleCalendar() {
       const title = document.getElementById('event-title').value.trim();
       const date = document.getElementById('event-date').value;
       const time = document.getElementById('event-time').value;
       const notes = document.getElementById('event-notes').value.trim();
       if (!title||!date) { alert('Enter title and date first'); return; }
-      const start = date.replace(/-/g,'') + (time ? 'T'+time.replace(':','')+'00' : '');
-      const end = date.replace(/-/g,'') + (time ? 'T'+String(parseInt(time.split(':')[0])+1).padStart(2,'0')+time.split(':')[1]+'00' : '');
-      const url = `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${start}/${end}&details=${encodeURIComponent(notes||'Added by El')}`;
-      window.open(url, '_blank');
-      // Save to El too
       const d = El.state.get();
+      const token = d.settings && d.settings.gcalToken;
+      if (token) {
+        // Real API POST when OAuth token is available
+        const startDt = time ? `${date}T${time}:00` : date;
+        const endDt   = time
+          ? `${date}T${String(parseInt(time.split(':')[0])+1).padStart(2,'0')}:${time.split(':')[1]}:00`
+          : date;
+        const isAllDay = !time;
+        const body = {
+          summary: title,
+          description: notes || 'Added by El',
+          ...(isAllDay
+            ? { start: { date }, end: { date } }
+            : { start: { dateTime: startDt, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+                end:   { dateTime: endDt,   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } })
+        };
+        try {
+          const resp = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(()=>({}));
+            throw new Error((err.error && err.error.message) || resp.statusText);
+          }
+          El.ui.showToast('Added to Google Calendar ✓', 'success');
+        } catch(e) {
+          El.ui.showToast('GCal error: ' + e.message, 'error', 5000);
+        }
+      } else {
+        // Fallback: open Google Calendar template URL
+        const start = date.replace(/-/g,'') + (time ? 'T'+time.replace(':','')+'00' : '');
+        const end   = date.replace(/-/g,'') + (time ? 'T'+String(parseInt(time.split(':')[0])+1).padStart(2,'0')+time.split(':')[1]+'00' : '');
+        const url = `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${start}/${end}&details=${encodeURIComponent(notes||'Added by El')}`;
+        window.open(url, '_blank');
+        const id = El.uid();
+        d.events.push({ id, title, type:document.getElementById('event-type').value, date, time, notes, gcal_url:url });
+        El.state.save();
+        El.ui.closeModal('modal-add-event');
+        El.schedule.renderCalendar();
+        return;
+      }
+      // Save to El after successful API call
       const id = El.uid();
-      d.events.push({ id, title, type:document.getElementById('event-type').value, date, time, notes, gcal_url:url });
+      d.events.push({ id, title, type:document.getElementById('event-type').value, date, time, notes });
       El.state.save();
       El.ui.closeModal('modal-add-event');
       El.schedule.renderCalendar();
@@ -3999,6 +4078,7 @@ const El = {
         input.value = '';
         input.style.height = 'auto';
       }
+      El.ui.showToast('Thinking… ✦', 'info', 2500);
       El.nav.go('ai');
       setTimeout(() => this.sendMsg(text), 80);
     },
@@ -4114,6 +4194,23 @@ const El = {
       const d = El.state.get();
       const type = String(action.type || '').toLowerCase();
       const data = action.data || action;
+      // Post-capture feedback toast based on action type
+      const _captureToasts = {
+        'event': 'Added to calendar ✓',
+        'events': 'Added to calendar ✓',
+        'transaction': 'Expense logged ✓',
+        'expense': 'Expense logged ✓',
+        'income': 'Income source ready ✓',
+        'income_events': 'Income + paydays ready ✓',
+        'debt': 'Debt ready to add ✓',
+        'savings': 'Savings goal ready ✓',
+        'budget': 'Budget updated ✓',
+        'fitness': 'Fitness entry ready ✓',
+        'reminder': 'Reminder set ✓',
+        'recurring': 'Recurring item ready ✓'
+      };
+      const _toastMsg = _captureToasts[type];
+      if (_toastMsg) El.ui.showToast(_toastMsg, 'success', 2500);
       const money = v => Math.max(0, Number(String(v ?? 0).replace(/[$,]/g,'')) || 0);
       let pending = null;
 
@@ -5546,11 +5643,6 @@ document.addEventListener('DOMContentLoaded', () => {
         history.replaceState(null, '', window.location.pathname + window.location.search);
       }
     } catch(e) { console.warn('[El] GCal OAuth parse error:', e); }
-  }
-  // Show capture mic button only if Speech API is supported
-  if (window.SpeechRecognition || window.webkitSpeechRecognition) {
-    const captureMic = document.getElementById('capture-mic-btn');
-    if (captureMic) captureMic.style.display = '';
   }
   const data = El.state.load();
   if (data && data.profile && data.profile.name) {
