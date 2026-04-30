@@ -9,8 +9,9 @@
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
 <!-- El fix build: 2026-04-29 bug-fixes-v2 recurring-calendar modal-label swipe-dismiss ai-autoaction -->
-<link rel="manifest" href='data:application/manifest+json,{"name":"El — Everyday Life","short_name":"El","display":"standalone","background_color":"%230d0d18","theme_color":"%230d0d18","start_url":"/","orientation":"portrait","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns='http%3A//www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230d0d18'/%3E%3Ctext x='50%25' y='55%25' font-size='110' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' fill='%237c6aff'%3E✦%3C/text%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"}]}'>
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%230d0d18'/%3E%3Ctext x='50%25' y='55%25' font-size='110' text-anchor='middle' dominant-baseline='middle' font-family='system-ui' fill='%237c6aff'%3E✦%3C/text%3E%3C/svg%3E">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="./el-icon.svg">
+<link rel="apple-touch-icon" href="./el-icon-180.png">
 <meta name="mobile-web-app-capable" content="yes">
 
 <script>/* El Mini Charts v1 – fully inline, no CDN */
@@ -543,6 +544,27 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
 .settings-name { font-size: 15px; font-weight: 500; }
 .settings-desc { font-size: 12px; color: var(--text2); margin-top: 1px; }
 .settings-arrow { color: var(--text3); font-size: 16px; }
+
+.quick-capture-card { border-color: rgba(124,106,255,0.45); box-shadow: 0 12px 34px rgba(124,106,255,0.10); }
+.quick-capture-title { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+.quick-capture-sub { font-size: 12px; color: var(--text2); margin-bottom: 12px; line-height: 1.4; }
+.quick-capture-row { display: flex; gap: 8px; align-items: flex-end; }
+.quick-capture-input {
+  min-height: 48px; max-height: 96px; resize: none; flex: 1;
+  background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius-sm); padding: 12px 13px; font-size: 15px;
+  outline: none; line-height: 1.35;
+}
+.quick-capture-input:focus { border-color: var(--primary); }
+.quick-capture-send { width: 48px; height: 48px; border-radius: 50%; border: none; flex-shrink: 0; background: var(--primary); color: white; font-size: 18px; font-weight: 800; cursor: pointer; }
+.quick-capture-chips { display: flex; gap: 8px; overflow-x: auto; padding-top: 10px; scrollbar-width: none; }
+.quick-capture-chips::-webkit-scrollbar { display: none; }
+.quick-capture-chip { flex: 0 0 auto; background: var(--bg3); border: 1px solid var(--border); color: var(--text2); border-radius: 999px; padding: 7px 10px; font-size: 12px; cursor: pointer; }
+.command-item { display: flex; align-items: flex-start; gap: 11px; padding: 12px 0; border-top: 1px solid var(--border); }
+.command-item:first-of-type { border-top: none; padding-top: 0; }
+.command-label { width: 72px; flex-shrink: 0; color: var(--text3); font-size: 11px; font-weight: 800; letter-spacing: 0.7px; text-transform: uppercase; }
+.command-title { color: var(--text); font-size: 14px; font-weight: 700; line-height: 1.35; }
+.command-sub { color: var(--text2); font-size: 12px; margin-top: 3px; line-height: 1.45; }
 
 @media (min-width: 480px) {
   nav, .chat-input-bar { border-radius: var(--radius) var(--radius) 0 0; }
@@ -1209,7 +1231,13 @@ const El = {
       return this._data;
     },
     save() {
-      localStorage.setItem('el_data', JSON.stringify(this._data));
+      // Never let localStorage issues strand the user on onboarding.
+      // Safari private mode, full storage, or blocked storage can throw here.
+      try {
+        localStorage.setItem('el_data', JSON.stringify(this._data));
+      } catch(e) {
+        console.warn('El.state.save failed; continuing with in-memory data only', e);
+      }
     },
     get() { return this._data; },
     set(key, val) { this._data[key] = val; this.save(); }
@@ -1222,7 +1250,15 @@ const El = {
     const c = s ? s.profile.currency : 'USD';
     return (sym[c]||'$') + Math.abs(amount).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
   },
-  today() { return new Date().toISOString().split('T')[0]; },
+  dateKey(date) {
+    const d = date || new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  },
+  monthKey(date) {
+    const d = date || new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  },
+  today() { return El.dateKey(new Date()); },
   uid() { return '_' + Math.random().toString(36).substr(2,9); },
   // Returns planning assumptions (with defaults for backward compat)
   getAssumptions(d) {
@@ -1304,7 +1340,14 @@ const El = {
     El.state.save();
     document.getElementById('onboarding').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    El.init();
+    try {
+      El.init();
+    } catch(e) {
+      console.error('El startup failed after onboarding', e);
+      El.ui?.showToast?.('Startup warning: loaded safe mode. Check console for details.');
+      const home = document.getElementById('screen-home');
+      if (home) home.innerHTML = '<div class="page-header"><div class="page-title">El</div></div><div class="card"><div class="card-title">Safe Mode</div><div style="margin-top:10px;color:var(--text2);line-height:1.5">Your profile was created, but one startup module failed. Try refreshing once. If this repeats, send the console error.</div></div>';
+    }
   },
 
   // ── INIT ───────────────────────────────
@@ -1414,7 +1457,7 @@ const El = {
       const totalDebt = d.debts.reduce((s,x)=>s+x.balance,0);
       const totalSavings = d.savings.reduce((s,x)=>s+x.current,0);
       const now = new Date();
-      const monthTxns = d.budget.transactions.filter(t => t.date && t.date.startsWith(now.toISOString().substr(0,7)));
+      const monthTxns = d.budget.transactions.filter(t => t.date && t.date.startsWith(El.monthKey(now)));
       const spent = monthTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
       const income = monthTxns.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0) || El.getIncome(d);
       const upcomingBills = d.debts.filter(x=>x.dueDay).sort((a,b)=>El.daysUntil(a.dueDay)-El.daysUntil(b.dueDay)).slice(0,3);
@@ -1422,6 +1465,32 @@ const El = {
       const todayEvents = d.events.filter(e=>e.date===todayStr).sort((a,b)=>a.time>b.time?1:-1);
       const scoreColor = score>=80?'var(--teal)':score>=60?'#a8ff78':score>=40?'var(--yellow)':score>=20?'var(--orange)':'var(--red)';
       const scoreGrade = score>=90?'A+':score>=80?'A':score>=70?'B':score>=60?'C':score>=50?'D':'F';
+      const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = El.dateKey(tomorrow);
+      const tomorrowEvents = d.events.filter(e=>e.date===tomorrowStr).sort((a,b)=>a.time>b.time?1:-1);
+      const todayRecurring = El.schedule.recurringOnDate(todayStr);
+      const tomorrowRecurring = El.schedule.recurringOnDate(tomorrowStr);
+      const dueSoon = upcomingBills.find(b => El.daysUntil(b.dueDay) <= 3) || upcomingBills[0];
+      const todayTxns = d.budget.transactions.filter(t=>t.date===todayStr);
+      const todayFood = ((d.macros && d.macros.log) || []).filter(e=>e.date===todayStr);
+      const safe = s => El.ai.escapeHtml(s);
+      const todayLabel = todayEvents.length
+        ? todayEvents.slice(0,2).map(e=>(e.time?e.time+' ':'') + e.title).join(' | ')
+        : todayRecurring.length ? todayRecurring.slice(0,2).map(r=>r.description).join(' | ')
+        : 'No calendar items yet';
+      const tomorrowLabel = tomorrowEvents.length
+        ? tomorrowEvents.slice(0,2).map(e=>(e.time?e.time+' ':'') + e.title).join(' | ')
+        : tomorrowRecurring.length ? tomorrowRecurring.slice(0,2).map(r=>r.description).join(' | ')
+        : 'Open space';
+      const checkIn = !todayTxns.length
+        ? 'No money logged today'
+        : !todayFood.length ? 'No food logged today'
+        : todayEvents.length ? 'Day is moving'
+        : 'Capture anything that should not be forgotten';
+      const nextMove = dueSoon
+        ? 'Check ' + dueSoon.name + ' due in ' + El.daysUntil(dueSoon.dueDay) + ' day' + (El.daysUntil(dueSoon.dueDay)===1?'':'s')
+        : score < 60 ? 'Review the highest-impact finance move'
+        : 'Drop the next loose thought into capture';
 
       document.getElementById('screen-home').innerHTML = `
         <div class="page-header fade-in">
@@ -1432,6 +1501,38 @@ const El = {
           <div style="display:flex;gap:8px">
             <button class="header-btn" onclick="El.ui.openModal('modal-add-transaction')">+ Add</button>
             <button class="header-btn" onclick="El.nav.go('settings')" style="padding:8px 10px">⚙️</button>
+          </div>
+        </div>
+
+        <div class="card quick-capture-card fade-in">
+          <div class="quick-capture-title">Capture</div>
+          <div class="quick-capture-sub">Calendar, money, food, workouts, reminders, and messy thoughts.</div>
+          <div class="quick-capture-row">
+            <textarea class="quick-capture-input" id="quick-capture-input" rows="1" placeholder="Dentist next Thu at 2pm"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();El.ai.quickCapture();}"
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,96)+'px'"></textarea>
+            <button class="quick-capture-send" onclick="El.ai.quickCapture()">+</button>
+          </div>
+          <div class="quick-capture-chips">
+            <button class="quick-capture-chip" onclick="El.ai.fillQuickCapture('dentist next Thursday at 2pm')">dentist Thu 2pm</button>
+            <button class="quick-capture-chip" onclick="El.ai.fillQuickCapture('spent $18 on lunch')">spent $18 lunch</button>
+            <button class="quick-capture-chip" onclick="El.ai.fillQuickCapture('pay Chase on the 15th')">pay Chase 15th</button>
+          </div>
+        </div>
+
+        <div class="card fade-in">
+          <div class="card-header"><div class="card-title">Daily Command Center</div><button class="card-action" onclick="El.nav.go('schedule')">Calendar</button></div>
+          <div class="command-item">
+            <div class="command-label">Today</div>
+            <div><div class="command-title">${safe(todayLabel)}</div><div class="command-sub">${todayEvents.length + todayRecurring.length} calendar item${todayEvents.length + todayRecurring.length===1?'':'s'} | ${checkIn}</div></div>
+          </div>
+          <div class="command-item">
+            <div class="command-label">Tomorrow</div>
+            <div><div class="command-title">${safe(tomorrowLabel)}</div><div class="command-sub">${tomorrow.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</div></div>
+          </div>
+          <div class="command-item">
+            <div class="command-label">Next</div>
+            <div><div class="command-title">${safe(nextMove)}</div><div class="command-sub">One useful thing to handle before the day gets away.</div></div>
           </div>
         </div>
 
@@ -1505,7 +1606,7 @@ const El = {
 
         ${(()=>{
           const lm=new Date(); lm.setMonth(lm.getMonth()-1);
-          const lmStr=lm.toISOString().substr(0,7);
+          const lmStr=El.monthKey(lm);
           const lmTxns=d.budget.transactions.filter(t=>t.date&&t.date.startsWith(lmStr));
           const lmSpent=lmTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
           const lmInc=lmTxns.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0)||El.getIncome(d);
@@ -1555,7 +1656,7 @@ const El = {
 
       if (tab === 'budget') {
         const now = new Date();
-        const monthStr = now.toISOString().substr(0,7);
+        const monthStr = El.monthKey(now);
         const txns = d.budget.transactions.filter(t=>t.date&&t.date.startsWith(monthStr));
         const spentBycat = {};
         txns.filter(t=>t.type==='expense').forEach(t=>{ spentBycat[t.category]=(spentBycat[t.category]||0)+t.amount; });
@@ -2757,7 +2858,7 @@ const El = {
       let score = 50;
       const income = El.getIncome(d) || 1;
       const now = new Date();
-      const monthStr = now.toISOString().substr(0,7);
+      const monthStr = El.monthKey(now);
       const txns = d.budget.transactions.filter(t=>t.date&&t.date.startsWith(monthStr));
       const spent = txns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
       const totalDebt = d.debts.reduce((s,x)=>s+x.balance,0);
@@ -2823,7 +2924,7 @@ const El = {
         const freqDays = {weekly:7,biweekly:14,monthly:30,yearly:365};
         const nextD = new Date((date||El.today())+'T12:00:00');
         nextD.setDate(nextD.getDate() + (freqDays[freq]||30));
-        d.recurring.push({ id:El.uid(), description:desc||'Transaction', amount:amt, frequency:freq, category:cat, nextDate:nextD.toISOString().split('T')[0] });
+        d.recurring.push({ id:El.uid(), description:desc||'Transaction', amount:amt, frequency:freq, category:cat, nextDate:El.dateKey(nextD) });
       }
       El.state.save();
       El.ui.closeModal('modal-add-transaction');
@@ -2956,7 +3057,7 @@ const El = {
         else if (freq === 'biweekly') nd.setDate(nd.getDate() + 14);
         else if (freq === 'yearly') nd.setFullYear(nd.getFullYear() + 1);
         else nd.setMonth(nd.getMonth() + 1);
-        r.nextDate = nd.toISOString().substr(0, 10);
+        r.nextDate = El.dateKey(nd);
         changed = true;
       });
       if (changed) El.state.save();
@@ -3005,7 +3106,7 @@ const El = {
         const next = new Date(rec.nextDate+'T12:00:00');
         const days = {weekly:7,biweekly:14,monthly:30,yearly:365}[rec.frequency]||30;
         next.setDate(next.getDate()+days);
-        rec.nextDate = next.toISOString().split('T')[0];
+        rec.nextDate = El.dateKey(next);
       }
       El.state.save();
       El.render.financeTab('budget');
@@ -3654,6 +3755,28 @@ const El = {
       document.getElementById('chat-input').value = text;
       this.send();
     },
+    fillQuickCapture(text) {
+      const input = document.getElementById('quick-capture-input');
+      if (!input) return;
+      input.value = text;
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 96) + 'px';
+      input.focus();
+    },
+    quickCapture() {
+      const input = document.getElementById('quick-capture-input');
+      const text = (input && input.value ? input.value : '').trim();
+      if (!text) {
+        if (input) input.focus();
+        return;
+      }
+      if (input) {
+        input.value = '';
+        input.style.height = 'auto';
+      }
+      El.nav.go('ai');
+      setTimeout(() => this.sendMsg(text), 80);
+    },
     send() {
       const input = document.getElementById('chat-input');
       const text = input.value.trim();
@@ -3716,7 +3839,7 @@ const El = {
         }
         // Collect count future dates
         for (let i = 0; i < count; i++) {
-          dates.push(d.toISOString().substr(0, 10));
+          dates.push(El.dateKey(d));
           if (days) { d = new Date(d.getTime() + days * 86400000); }
           else { d = new Date(d); d.setMonth(d.getMonth() + 1); }
         }
@@ -3901,7 +4024,7 @@ const El = {
       // Schedule: next 14 days
       const today = El.today();
       const in14 = new Date(); in14.setDate(in14.getDate()+14);
-      const in14str = in14.toISOString().split('T')[0];
+      const in14str = El.dateKey(in14);
       const upcomingEvents = (d.events||[])
         .filter(e => e.date >= today && e.date <= in14str)
         .sort((a,b) => a.date > b.date ? 1 : -1);
@@ -3973,7 +4096,7 @@ FUNCTION CALLS — CRITICAL: Whenever the user mentions ANY of the following, yo
 • A workout or exercise session completed
 
 Format — put this EXACTLY at the end of your reply, on its own line, with no explanation:
-[[EL_ACTION:{"type":"transaction","data":{"description":"groceries","amount":50,"transactionType":"expense","category":"food","date":"${new Date().toISOString().split('T')[0]}"}}]]
+[[EL_ACTION:{"type":"transaction","data":{"description":"groceries","amount":50,"transactionType":"expense","category":"food","date":"${El.today()}"}}]]
 
 Types and required fields:
 • transaction: description, amount, transactionType (expense|income), category, date (YYYY-MM-DD)
@@ -4086,7 +4209,93 @@ Use **bold** for key numbers.`;
         this.hideTyping();
         this.addMsg('ai', reply);
         this.history.push({ role:'ai', content:reply });
+        this.saveHistory();
       }, 400 + Math.random()*400);
+    },
+    parseSimpleEvent(q) {
+      const text = String(q || '').toLowerCase();
+      if (!/(dentist|doctor|appointment|meeting|call|pay|bill|payment|remind|reminder|task|todo|class|practice|workout|gym|event|birthday|lunch|dinner)/.test(text)) return null;
+
+      const now = new Date();
+      let date = null;
+      if (/\btoday\b/.test(text)) {
+        date = new Date(now);
+      } else if (/\btomorrow\b/.test(text)) {
+        date = new Date(now);
+        date.setDate(date.getDate() + 1);
+      }
+
+      const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+      if (!date) {
+        const dayM = text.match(/\b(next\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)\b/i);
+        if (dayM) {
+          const shortMap = { sun:0, mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, thurs:4, fri:5, sat:6 };
+          const token = dayM[2].toLowerCase();
+          const targetDow = shortMap[token] ?? dayNames.indexOf(token);
+          date = new Date(now);
+          let diff = (targetDow - date.getDay() + 7) % 7;
+          if (dayM[1] || diff === 0) diff += 7;
+          date.setDate(date.getDate() + diff);
+        }
+      }
+
+      if (!date) {
+        const monthIdx = { jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11 };
+        const md = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i);
+        if (md) {
+          date = new Date(now.getFullYear(), monthIdx[md[1].toLowerCase()], parseInt(md[2]));
+          if (date < new Date(now.getFullYear(), now.getMonth(), now.getDate())) date.setFullYear(now.getFullYear() + 1);
+        }
+      }
+
+      if (!date) {
+        const slash = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+        if (slash) {
+          const yr = slash[3] ? parseInt(slash[3].length === 2 ? '20' + slash[3] : slash[3]) : now.getFullYear();
+          date = new Date(yr, parseInt(slash[1]) - 1, parseInt(slash[2]));
+          if (!slash[3] && date < new Date(now.getFullYear(), now.getMonth(), now.getDate())) date.setFullYear(now.getFullYear() + 1);
+        }
+      }
+
+      if (!date) {
+        const dom = text.match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/i);
+        if (dom) {
+          date = new Date(now.getFullYear(), now.getMonth(), parseInt(dom[1]));
+          if (date < new Date(now.getFullYear(), now.getMonth(), now.getDate())) date.setMonth(date.getMonth() + 1);
+        }
+      }
+      if (!date || isNaN(date)) return null;
+
+      let time = '';
+      const timeM = text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i)
+        || text.match(/\b(\d{1,2})(?::(\d{2}))\s*(am|pm)?\b/i)
+        || text.match(/\b(\d{1,2})\s*(am|pm)\b/i);
+      if (timeM) {
+        let h = parseInt(timeM[1]);
+        const min = timeM[2] && /^\d{2}$/.test(timeM[2]) ? parseInt(timeM[2]) : 0;
+        const ampm = (timeM[3] || (/am|pm/i.test(timeM[2] || '') ? timeM[2] : '') || '').toLowerCase();
+        if (ampm === 'pm' && h !== 12) h += 12;
+        if (ampm === 'am' && h === 12) h = 0;
+        if (!ampm && h >= 1 && h <= 7) h += 12;
+        if (h >= 0 && h < 24) time = String(h).padStart(2,'0') + ':' + String(min).padStart(2,'0');
+      }
+
+      let title = text
+        .replace(/\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)\b/ig, '')
+        .replace(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)\b/ig, '')
+        .replace(/\b(today|tomorrow)\b/ig, '')
+        .replace(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?\b/ig, '')
+        .replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, '')
+        .replace(/\b(?:on\s+)?(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b/ig, '')
+        .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/ig, '')
+        .replace(/\b(add|put|schedule|calendar|event|remind me to|remind|reminder|please)\b/ig, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      title = title.replace(/^(to|for|on|at)\s+/i, '').trim();
+      const type = /pay|bill|payment|due/.test(text) ? 'bill' : /task|todo|remind|reminder/.test(text) ? 'reminder' : 'event';
+      if (!title) title = type === 'bill' ? 'Payment' : type === 'reminder' ? 'Reminder' : 'Event';
+      title = title.replace(/\b\w/g, ch => ch.toUpperCase());
+      return { id:El.uid(), title, type, date:El.dateKey(date), time, notes:'', gcal_url:null };
     },
     generateReply(q) {
       const d = El.state.get();
@@ -4097,7 +4306,7 @@ Use **bold** for key numbers.`;
       const totalSavings = d.savings.reduce((s,x)=>s+x.current,0);
       const totalMin = d.debts.reduce((s,x)=>s+x.minPayment,0);
       const now = new Date();
-      const monthStr = now.toISOString().substr(0,7);
+      const monthStr = El.monthKey(now);
       const txns = d.budget.transactions.filter(t=>t.date&&t.date.startsWith(monthStr));
       const spent = txns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
       const score = El.finance.healthScore();
@@ -4135,6 +4344,25 @@ Use **bold** for key numbers.`;
         if (!d.debts.length && !d.events.filter(e=>e.type==='bill').length) return `No bills tracked yet! Add your debts in Finance → Debts to track due dates, or add bill reminders in Schedule.`;
         const bills = d.debts.filter(x=>x.dueDay).sort((a,b)=>El.daysUntil(a.dueDay)-El.daysUntil(b.dueDay));
         return `Here are your upcoming payments:\n\n${bills.map(b=>`💳 **${b.name}** — ${El.fmt(b.minPayment)} due in ${El.daysUntil(b.dueDay)} days (day ${b.dueDay})`).join('\n')}\n\nTotal minimum payments: ${El.fmt(totalMin)}/month. Consider setting up autopay to avoid late fees!`;
+      }
+
+      {
+        const parsedEvent = this.parseSimpleEvent(q);
+        if (parsedEvent && !(El.ai._pending && El.ai._pending.type === 'events')) {
+          El.ai._pending = { type:'events', data:[parsedEvent] };
+          const dt = new Date(parsedEvent.date + 'T12:00:00');
+          const label = dt.toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' });
+          const timeLabel = parsedEvent.time ? ' at ' + parsedEvent.time : '';
+          return 'I can add this to your schedule:<br><br>' +
+            '<div style="background:var(--bg);border-radius:12px;padding:14px;margin:4px 0">' +
+              '<div style="font-weight:700;color:var(--text);margin-bottom:6px">' + this.escapeHtml(parsedEvent.title) + '</div>' +
+              '<div style="font-size:13px;color:var(--text2)">' + label + timeLabel + '</div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">' +
+              '<button onclick="El.ai.confirmAdd()" style="background:var(--teal);color:#000;border:none;border-radius:20px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer">Add to Calendar</button>' +
+              '<button onclick="El.ai.cancelAdd()" style="background:var(--bg3);color:var(--text2);border:none;border-radius:20px;padding:8px 14px;font-size:13px;cursor:pointer">Cancel</button>' +
+            '</div>';
+        }
       }
 
       if (q.match(/schedule|today|tomorrow|event|calendar|this week|next week/)) {
@@ -4306,7 +4534,7 @@ Use **bold** for key numbers.`;
               } else {
                 next.setDate(lastPay.getDate() + freqDays[freq] * i);
               }
-              const ds = next.toISOString().split('T')[0];
+              const ds = El.dateKey(next);
               if (ds >= todayStr) events.push({ id:El.uid(), title:'💵 Payday', type:'event', date:ds, time:'09:00', notes:'', gcal_url:null });
               if (i > maxEvents * 2) break;
             }
@@ -4462,7 +4690,7 @@ Use **bold** for key numbers.`;
               const ev = new Date(today);
               let diff = (dow-ev.getDay()+7)%7; if(diff===0&&week===0) diff=7;
               ev.setDate(ev.getDate()+diff+week*7);
-              const ds = ev.toISOString().split('T')[0];
+              const ds = El.dateKey(ev);
               if(ds>=todayStr) events.push({id:El.uid(),title,type:'event',date:ds,time:timeStr,notes:'',gcal_url:null});
             });
           }
@@ -4504,7 +4732,7 @@ Change these in Settings → Risk Profile and Settings → Planning Assumptions.
       }
 
       if (q.match(/runway|job loss|laid off|lose.*job|emergency fund|contingency/)) {
-        const monthExpenses = (()=>{const now=new Date();const ms=now.toISOString().substr(0,7);return d.budget.transactions.filter(t=>t.type==='expense'&&t.date&&t.date.startsWith(ms)).reduce((s,t)=>s+t.amount,0)||income*0.8;})();
+        const monthExpenses = (()=>{const now=new Date();const ms=El.monthKey(now);return d.budget.transactions.filter(t=>t.type==='expense'&&t.date&&t.date.startsWith(ms)).reduce((s,t)=>s+t.amount,0)||income*0.8;})();
         const totalSav = d.savings.reduce((s,x)=>s+x.current,0);
         const runway = monthExpenses>0?totalSav/monthExpenses:0;
         return runway>=target
@@ -5000,4 +5228,54 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       const tpl = this._activeTemplate;
       let totalSets = 0;
       tpl.exercises.forEach(function(ex, ei) {
-        for (let si = 0; s
+        for (let si = 0; si < ex.sets; si++) {
+          const doneBtn = document.getElementById('w-done-' + ei + '-' + si);
+          if (doneBtn && doneBtn.classList.contains('done')) totalSets++;
+        }
+      });
+      const d = El.state.get();
+      if (!d.workouts) d.workouts = { templates: [], log: [] };
+      d.workouts.log.push({
+        id: El.uid(), name: tpl.name, date: El.today(),
+        sets: totalSets, exercises: tpl.exercises.length
+      });
+      El.state.save();
+      this._activeTemplate = null;
+      El.ui.closeModal('modal-log-workout');
+      El.haptic('success');
+      El.render.fitness();
+      El.fitness.showTab('workouts');
+    }
+  }
+};
+window.El = El;
+window.ElDebug = () => ({ hasEl: !!window.El, data: El.state.get(), current: El.nav?.current });
+
+// ── BOOT ───────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const data = El.state.load();
+  if (data && data.profile && data.profile.name) {
+    document.getElementById('onboarding').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    try { El.init(); }
+    catch(e) {
+      console.error('El boot failed', e);
+      const home = document.getElementById('screen-home');
+      if (home) home.innerHTML = '<div class="page-header"><div class="page-title">El</div></div><div class="card"><div class="card-title">Safe Mode</div><div style="margin-top:10px;color:var(--text2);line-height:1.5">El loaded, but one module failed during startup. Clear site data or send the console error.</div></div>';
+    }
+  }
+  // Prevent pull-to-refresh on mobile
+  document.body.addEventListener('touchmove', e=>{ if(e.touches.length>1) e.preventDefault(); }, { passive:false });
+});
+</script>
+
+<script>
+// GitHub Pages friendly offline support.
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+  });
+}
+</script>
+</body>
+</html>

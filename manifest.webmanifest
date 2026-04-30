@@ -1,0 +1,37 @@
+{
+  "name": "El - Everyday Life",
+  "short_name": "El",
+  "description": "A personal life assistant for calendar capture, planning, finances, and daily clarity.",
+  "display": "standalone",
+  "background_color": "#0d0d18",
+  "theme_color": "#0d0d18",
+  "start_url": "./",
+  "scope": "./",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./el-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./el-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./el-icon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./el-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
