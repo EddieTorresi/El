@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29-bug-fixes-v6 budget-edit-tap clear-allocations auto-model-migration -->
+<!-- El fix build: 2026-04-29-bug-fixes-v7 fitness-pack weight-log last-set-memory pr-nudge workout-schedule -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-04-29-bug-fixes-v6';</script>
+<script>window.EL_BUILD = '2026-04-29-bug-fixes-v7';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -1039,6 +1039,31 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
 </div>
 
 <!-- LOG FOOD MODAL -->
+<div class="modal-overlay" id="modal-log-weight" onclick="if(event.target===this)El.ui.closeModal('modal-log-weight')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Log Weight</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Weight</label>
+        <input class="form-input" id="weight-value" placeholder="e.g. 178.5" type="number" step="0.1" inputmode="decimal">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unit</label>
+        <select class="form-select" id="weight-unit">
+          <option value="lbs">lbs</option>
+          <option value="kg">kg</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Date</label>
+      <input class="form-input" id="weight-date" type="date">
+    </div>
+    <button class="btn btn-primary" onclick="El.fitness.saveWeight()">Save Weight</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-log-food" onclick="if(event.target===this)El.ui.closeModal('modal-log-food')">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -1088,6 +1113,35 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
 </div>
 
 <!-- LOG WORKOUT SESSION MODAL -->
+<div class="modal-overlay" id="modal-schedule-workout" onclick="if(event.target===this)El.ui.closeModal('modal-schedule-workout')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="schedule-wkt-title">Schedule Workout</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:14px">Pick days and a time. El will add events to your calendar for the next 12 weeks.</div>
+    <input type="hidden" id="schedule-wkt-id" value="">
+    <div class="form-group">
+      <label class="form-label">Days of the Week</label>
+      <div id="schedule-dow-row" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+        ${['Mo','Tu','We','Th','Fr','Sa','Su'].map((lbl, i) => `<label style="flex:1;min-width:42px;text-align:center;padding:10px 4px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="checkbox" class="schedule-dow" data-dow="${(i+1)%7}" style="display:none" onchange="this.parentElement.style.background=this.checked?'var(--primary-glow)':'var(--bg3)';this.parentElement.style.borderColor=this.checked?'var(--primary)':'var(--border)';this.parentElement.style.color=this.checked?'var(--primary)':'var(--text)'">
+          ${lbl}
+        </label>`).join('')}
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Time</label>
+        <input class="form-input" id="schedule-time" type="time" value="06:00">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Weeks</label>
+        <input class="form-input" id="schedule-weeks" type="number" value="12" min="1" max="52">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="El.fitness.scheduleWorkoutSave()">Add to Calendar</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-log-workout" onclick="if(event.target===this)El.ui.closeModal('modal-log-workout')">
   <div class="modal" style="max-height:85vh;overflow-y:auto">
     <div class="modal-handle"></div>
@@ -1362,6 +1416,7 @@ const El = {
         events: [],
         workouts: { templates: [], log: [] },
         macros: { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] },
+        weightLog: [],
         paidBills: {},
         netWorthHistory: [],
         settings: { gcal_client_id: '', gcal_api_key: '', gcal_connected: false, gcalToken: '', aiProvider: 'builtin', aiApiKey: '', theme: 'dark' }
@@ -1393,6 +1448,7 @@ const El = {
       out.macros = out.macros || { goals: base.macros.goals, log: [] };
       out.macros.goals = merge(base.macros.goals, out.macros.goals || {});
       out.macros.log = Array.isArray(out.macros.log) ? out.macros.log : [];
+      out.weightLog = Array.isArray(out.weightLog) ? out.weightLog : [];
       out.paidBills = isObj(out.paidBills) ? out.paidBills : {};
       out.netWorthHistory = Array.isArray(out.netWorthHistory) ? out.netWorthHistory : [];
       out.settings = merge(base.settings, out.settings || {});
@@ -2400,6 +2456,42 @@ const El = {
             <button class="btn btn-primary" onclick="El.fitness.openLogFood()">+ Log Food</button>
           </div>
 
+          ${(()=>{
+            const wlog = (d.weightLog || []).slice().sort((a,b)=>a.date>b.date?1:-1);
+            const today = El.today();
+            const todayEntry = wlog.find(e=>e.date===today);
+            const last30 = wlog.slice(-30);
+            const first = last30.length ? last30[0] : null;
+            const latest = last30.length ? last30[last30.length-1] : null;
+            const delta = (first && latest) ? (latest.weight - first.weight) : 0;
+            const unit = (latest && latest.unit) || 'lbs';
+            // Mini sparkline
+            let spark = '';
+            if (last30.length >= 2) {
+              const vals = last30.map(e=>e.weight);
+              const mn = Math.min(...vals), mx = Math.max(...vals), rng = (mx-mn) || 1;
+              const pts = vals.map((v,i)=>((i/(vals.length-1))*220)+','+(34-((v-mn)/rng)*28)).join(' ');
+              spark = '<svg width="220" height="34" style="margin-top:4px;display:block"><polyline points="'+pts+'" fill="none" stroke="var(--teal)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            }
+            return `<div class="card" style="margin-top:4px">
+              <div class="card-header">
+                <div class="card-title">⚖️ Weight</div>
+                <button class="card-action" onclick="El.fitness.openLogWeight()">+ Log</button>
+              </div>
+              ${latest ? `
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <div style="font-size:28px;font-weight:800;color:var(--text)">${latest.weight} <span style="font-size:14px;color:var(--text3)">${unit}</span></div>
+                  ${last30.length >= 2 ? `<div style="font-size:12px;color:${delta<0?'var(--teal)':delta>0?'var(--orange)':'var(--text3)'}">${delta>=0?'+':''}${delta.toFixed(1)} over ${last30.length} days</div>` : ''}
+                </div>
+                <div style="font-size:11px;color:var(--text3);margin-top:2px">${todayEntry ? 'Logged today · ' + todayEntry.date : 'Last entry: ' + latest.date}</div>
+                ${spark}
+                ${wlog.length > 1 ? `<div style="font-size:11px;color:var(--text3);margin-top:8px">Recent: ${wlog.slice(-7).reverse().map(e=>e.date.slice(5)+' '+e.weight).join(' · ')}</div>` : ''}
+              ` : `
+                <div style="text-align:center;padding:8px 0;color:var(--text3);font-size:13px">No weight logged yet. Tap + Log to start tracking.</div>
+              `}
+            </div>`;
+          })()}
+
           ${todayLog.length > 0 ? `
           <div class="card fade-in">
             <div class="card-title" style="margin-bottom:10px">Today's Log</div>
@@ -2431,7 +2523,8 @@ const El = {
                   <div class="list-title">${wkt.name}</div>
                   <div class="list-sub">${wkt.exercises.length} exercise${wkt.exercises.length !== 1 ? 's' : ''}</div>
                 </div>
-                <div style="display:flex;gap:6px">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+                  <button onclick="El.fitness.openScheduleWorkout('${wkt.id}')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:var(--radius-sm);padding:5px 10px;font-size:11px;cursor:pointer" title="Add to calendar">📅</button>
                   <button onclick="El.fitness.startWorkout('${wkt.id}')" style="background:var(--teal-glow);border:1px solid var(--teal);color:var(--teal);border-radius:var(--radius-sm);padding:5px 12px;font-size:12px;cursor:pointer;font-weight:700">▶ Start</button>
                   <button onclick="El.fitness.removeWorkoutTemplate('${wkt.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;line-height:1">×</button>
                 </div>
@@ -6231,6 +6324,30 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       El.fitness.showTab('workouts');
     },
 
+    // Find the most recent logged session of a given template name that has
+    // per-exercise detail (newer logs have exerciseDetail; old ones do not).
+    _lastDetailedSession(templateName) {
+      const d = El.state.get();
+      const log = (d.workouts && d.workouts.log) || [];
+      for (let i = log.length - 1; i >= 0; i--) {
+        if (log[i].name === templateName && Array.isArray(log[i].exerciseDetail)) return log[i];
+      }
+      return null;
+    },
+    // All-time best (highest weight) recorded for a given exercise name.
+    _prFor(exerciseName) {
+      const d = El.state.get();
+      const log = (d.workouts && d.workouts.log) || [];
+      let best = 0;
+      log.forEach(s => {
+        if (!Array.isArray(s.exerciseDetail)) return;
+        s.exerciseDetail.forEach(e => {
+          if (e.name !== exerciseName || !Array.isArray(e.sets)) return;
+          e.sets.forEach(set => { if ((set.weight || 0) > best) best = set.weight; });
+        });
+      });
+      return best;
+    },
     startWorkout(id) {
       const d = El.state.get();
       const tpl = (d.workouts && d.workouts.templates || []).find(function(w){ return w.id === id; });
@@ -6238,17 +6355,34 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       this._activeTemplate = tpl;
       document.getElementById('log-wkt-title').textContent = tpl.name;
       const container = document.getElementById('log-wkt-exercises');
+      const lastSession = this._lastDetailedSession(tpl.name);
+      const self = this;
       container.innerHTML = tpl.exercises.map(function(ex, ei) {
+        // Look up last-time and PR for this exercise.
+        let lastEx = null;
+        if (lastSession) lastEx = (lastSession.exerciseDetail || []).find(e => e.name === ex.name);
+        const pr = self._prFor(ex.name);
+        const lastSummary = (lastEx && lastEx.sets && lastEx.sets.length)
+          ? 'Last: ' + lastEx.sets.map(st => (st.reps || '?') + (st.weight ? '×' + st.weight : '')).join(' / ')
+          : '';
+        const prSummary = pr > 0 ? 'PR: ' + pr + ' lbs' : '';
+        const hint = [lastSummary, prSummary].filter(Boolean).join(' · ');
+
         const rows = Array.from({ length: ex.sets }, function(_, si) {
+          // Prefill from last session if we have a matching set; else fall back to template defaults.
+          const lastSet = (lastEx && lastEx.sets && lastEx.sets[si]) ? lastEx.sets[si] : null;
+          const repsPh = lastSet && lastSet.reps ? lastSet.reps : ex.reps;
+          const wtPh   = lastSet && lastSet.weight ? lastSet.weight : ex.weight;
           return '<div class="workout-set-row">'
             + '<span style="font-size:12px;color:var(--text3);width:18px;text-align:right">' + (si + 1) + '</span>'
-            + '<input class="set-input" id="w-reps-' + ei + '-' + si + '" type="number" placeholder="' + ex.reps + '" inputmode="numeric">'
+            + '<input class="set-input" id="w-reps-' + ei + '-' + si + '" type="number" placeholder="' + repsPh + '" inputmode="numeric">'
             + '<span style="font-size:12px;color:var(--text3)">reps</span>'
-            + (ex.weight ? '<input class="set-input" id="w-wt-' + ei + '-' + si + '" type="number" placeholder="' + ex.weight + '" inputmode="decimal"><span style="font-size:12px;color:var(--text3)">lbs</span>' : '')
+            + (ex.weight ? '<input class="set-input" id="w-wt-' + ei + '-' + si + '" type="number" placeholder="' + wtPh + '" inputmode="decimal"><span style="font-size:12px;color:var(--text3)">lbs</span>' : '')
             + '<button class="set-done-btn" id="w-done-' + ei + '-' + si + '" onclick="this.classList.toggle(&apos;done&apos;);El.haptic()">&#10003;</button>'
             + '</div>';
         }).join('');
-        return '<div class="exercise-block"><div class="exercise-name">' + ex.name + '</div>' + rows + '</div>';
+        const hintHtml = hint ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;margin-bottom:6px">' + hint + '</div>' : '';
+        return '<div class="exercise-block"><div class="exercise-name">' + ex.name + '</div>' + hintHtml + rows + '</div>';
       }).join('');
       El.ui.openModal('modal-log-workout');
     },
@@ -6257,24 +6391,159 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       if (!this._activeTemplate) { El.ui.closeModal('modal-log-workout'); return; }
       const tpl = this._activeTemplate;
       let totalSets = 0;
+      // Capture pre-finish PRs so we can compare after saving the new session.
+      const prsBefore = {};
+      tpl.exercises.forEach(ex => { prsBefore[ex.name] = El.fitness._prFor(ex.name); });
+      const exerciseDetail = [];
       tpl.exercises.forEach(function(ex, ei) {
+        const sets = [];
         for (let si = 0; si < ex.sets; si++) {
           const doneBtn = document.getElementById('w-done-' + ei + '-' + si);
-          if (doneBtn && doneBtn.classList.contains('done')) totalSets++;
+          const isDone = !!(doneBtn && doneBtn.classList.contains('done'));
+          if (!isDone) continue;
+          totalSets++;
+          const repsRaw = document.getElementById('w-reps-' + ei + '-' + si);
+          const wtRaw   = document.getElementById('w-wt-' + ei + '-' + si);
+          const reps = repsRaw && repsRaw.value !== '' ? parseInt(repsRaw.value, 10) : (ex.reps || 0);
+          const weight = wtRaw && wtRaw.value !== '' ? parseFloat(wtRaw.value) : (ex.weight || 0);
+          sets.push({ reps: reps || 0, weight: weight || 0 });
         }
+        exerciseDetail.push({ name: ex.name, sets });
       });
       const d = El.state.get();
       if (!d.workouts) d.workouts = { templates: [], log: [] };
       d.workouts.log.push({
         id: El.uid(), name: tpl.name, date: El.today(),
-        sets: totalSets, exercises: tpl.exercises.length
+        sets: totalSets, exercises: tpl.exercises.length,
+        exerciseDetail
       });
       El.state.save();
+
+      // PR detection: compare each exercise's new max against the prior PR.
+      const prs = [];
+      exerciseDetail.forEach(e => {
+        const newMax = (e.sets || []).reduce((m, st) => Math.max(m, st.weight || 0), 0);
+        const old = prsBefore[e.name] || 0;
+        if (newMax > old && newMax > 0) prs.push({ name: e.name, oldVal: old, newVal: newMax });
+      });
+      if (prs.length) {
+        const summary = prs.slice(0, 2).map(p => p.name + ' ' + p.newVal + 'lbs' + (p.oldVal>0 ? ' (was ' + p.oldVal + ')' : '')).join(' · ');
+        El.ui.showToast('💪 New PR! ' + summary, 'success', 4000);
+      }
+
       this._activeTemplate = null;
       El.ui.closeModal('modal-log-workout');
       El.haptic('success');
       El.render.fitness();
       El.fitness.showTab('workouts');
+
+      // Offer to add as recurring on calendar (skip if a similar event already exists for the next 7 days).
+      const upcomingForThis = (d.events || []).filter(e =>
+        e.title && e.title.toLowerCase().includes(tpl.name.toLowerCase()) && e.date >= El.today()
+      ).length;
+      if (upcomingForThis === 0) {
+        setTimeout(() => El.fitness.offerWorkoutCalendar(tpl.id), 800);
+      }
+    },
+
+    // After a workout is logged, offer to put it on the calendar for future weeks.
+    offerWorkoutCalendar(tplId) {
+      const d = El.state.get();
+      const tpl = (d.workouts && d.workouts.templates || []).find(t => t.id === tplId);
+      if (!tpl) return;
+      if (!confirm('Add ' + tpl.name + ' to your calendar for upcoming weeks?\n\nYou\'ll pick days and time on the next screen.')) return;
+      this.openScheduleWorkout(tplId);
+    },
+
+    openScheduleWorkout(tplId) {
+      const d = El.state.get();
+      const tpl = (d.workouts && d.workouts.templates || []).find(t => t.id === tplId);
+      if (!tpl) return;
+      document.getElementById('schedule-wkt-id').value = tplId;
+      document.getElementById('schedule-wkt-title').textContent = 'Schedule ' + tpl.name;
+      // Pre-check today's day-of-week.
+      const todayDow = new Date().getDay(); // 0=Sun..6=Sat
+      document.querySelectorAll('.schedule-dow').forEach(cb => {
+        const dow = parseInt(cb.dataset.dow, 10);
+        cb.checked = (dow === todayDow);
+        cb.dispatchEvent(new Event('change'));
+      });
+      El.ui.openModal('modal-schedule-workout');
+    },
+
+    scheduleWorkoutSave() {
+      const tplId = document.getElementById('schedule-wkt-id').value;
+      const time = document.getElementById('schedule-time').value || '06:00';
+      const weeks = Math.max(1, Math.min(52, parseInt(document.getElementById('schedule-weeks').value, 10) || 12));
+      const dows = Array.from(document.querySelectorAll('.schedule-dow:checked')).map(cb => parseInt(cb.dataset.dow, 10));
+      if (!dows.length) { alert('Pick at least one day of the week.'); return; }
+      const d = El.state.get();
+      const tpl = (d.workouts && d.workouts.templates || []).find(t => t.id === tplId);
+      if (!tpl) return;
+      if (!d.events) d.events = [];
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      let added = 0;
+      for (let w = 0; w < weeks; w++) {
+        for (const dow of dows) {
+          const target = new Date(start);
+          // Find next occurrence of dow within this week or later.
+          const offset = (dow - start.getDay() + 7) % 7;
+          target.setDate(start.getDate() + offset + (w * 7));
+          if (target < new Date()) continue; // skip past
+          d.events.push({
+            id: El.uid(),
+            title: '🏋️ ' + tpl.name,
+            type: 'event',
+            date: El.dateKey(target),
+            time,
+            notes: 'Workout from your saved template',
+            gcal_url: null
+          });
+          added++;
+        }
+      }
+      El.state.save();
+      El.ui.closeModal('modal-schedule-workout');
+      El.haptic('success');
+      El.ui.showToast('Added ' + added + ' workout event' + (added !== 1 ? 's' : '') + ' to your calendar', 'success');
+    },
+
+    // ── Weight log ─────────────────────────
+    openLogWeight() {
+      const d = El.state.get();
+      const last = ((d.weightLog || []).slice().sort((a,b)=>a.date>b.date?1:-1).pop()) || null;
+      document.getElementById('weight-value').value = '';
+      document.getElementById('weight-unit').value = (last && last.unit) || 'lbs';
+      document.getElementById('weight-date').value = El.today();
+      El.ui.openModal('modal-log-weight');
+    },
+
+    saveWeight() {
+      const v = parseFloat(document.getElementById('weight-value').value);
+      const unit = document.getElementById('weight-unit').value || 'lbs';
+      const date = document.getElementById('weight-date').value || El.today();
+      if (!v || v <= 0) { alert('Enter a weight'); return; }
+      const d = El.state.get();
+      if (!Array.isArray(d.weightLog)) d.weightLog = [];
+      // Replace existing entry for the same date so users can correct.
+      d.weightLog = d.weightLog.filter(e => e.date !== date);
+      d.weightLog.push({ id: El.uid(), date, weight: v, unit });
+      d.weightLog.sort((a,b) => a.date > b.date ? 1 : -1);
+      // Cap at ~3 years.
+      if (d.weightLog.length > 1100) d.weightLog.splice(0, d.weightLog.length - 1100);
+      El.state.save();
+      El.ui.closeModal('modal-log-weight');
+      El.haptic('success');
+      El.ui.showToast('Weight logged ✓', 'success');
+      El.render.fitness();
+    },
+
+    removeWeight(id) {
+      const d = El.state.get();
+      d.weightLog = (d.weightLog || []).filter(e => e.id !== id);
+      El.state.save();
+      El.render.fitness();
     }
   }
 };
