@@ -1,6 +1,6 @@
 # El Personal Testing Log
 
-Last updated: 2026-04-29 (build v5)
+Last updated: 2026-04-29 (build v9)
 
 ## Current Stage
 
@@ -102,6 +102,56 @@ Every category row on the Budget tab is now tappable. Tap to open a modal pre-fi
 ### "Reset all" button
 
 When any allocation is non-zero, the Categories card header shows a small Reset all link in red that confirms then sets every category's monthly budget back to $0. This is the cleanup for the legacy demo carryover (1200 + 400 + 300 + 150 + 100 + 100 = $2,250) that persisted after demo mode was used and there was no UI to clear it.
+
+## Changes Logged For Build v7 (2026-04-29) — Fitness Pack
+
+### Daily weight log
+
+New section in the Fitness → Nutrition tab. Tap "+ Log" on the Weight card to enter today's weight (lbs or kg). The card shows the latest weight, a 30-day trend with mini sparkline, the change vs 30 days ago, and a recent-7 entries strip. Same-date entries replace each other so you can correct a misclick. Stored in `d.weightLog[]` capped at ~3 years.
+
+### Last-set memory + PR detection
+
+When I tap Start on a saved workout, each exercise now shows a hint like "Last: 3x10×135 / PR: 145" above the set rows, and the weight inputs are pre-filled with whatever I lifted last session. Old workout logs from before this version don't have per-set data so they show no hint, but every new session captures `exerciseDetail[]` so the hints fill in over time. After finishing a workout, El compares each exercise's new max weight to the prior PR; new PRs trigger a "💪 New PR!" toast.
+
+### Workout → calendar
+
+Two paths. (1) Each saved workout template gets a small `📅` button next to ▶ Start. Tapping opens a modal where I pick day(s) of the week, a time, and how many weeks (default 12), and El generates the recurring calendar events. (2) After finishing a workout, if there's no upcoming event for it, El prompts "Add to your calendar for upcoming weeks?" with one tap that opens the same modal pre-checked for today's day-of-week.
+
+## Changes Logged For Build v8 (2026-04-29) — Finance Pack 1
+
+### Spending velocity (Home)
+
+A small Home card that shows up whenever there's been any spending this month. Format: "On pace — projected $2,580 by month-end (target $2,250)" with a status color and the current daily average. Target prefers your total category allocations; falls back to 70% of income if no budget is set.
+
+### What changed (Mondays only)
+
+A Monday-morning card on Home with week-over-week deltas: spend this week vs last week (with % change), the biggest-shift category, net-worth delta, and count of bills due in the next 7 days. Hidden every other day so it doesn't feel noisy.
+
+### Smart budget suggestion
+
+When my income is set but every category is at $0, a green Home banner offers "Apply 50/30/20" — one tap distributes the income across my existing categories by name match (Housing 30%, Food 12%, Transport 8%, Utilities 5%, Healthcare 5%, Entertainment 10%). Dismissable with `d.settings.smartBudgetDismissed`.
+
+### Subscription tracker (Budget tab)
+
+New auto-detected section. Algorithm: groups expense transactions by description, requires 3+ entries with stable amounts (within 15%) and roughly monthly cadence (25-35 day gaps). Shows the detected list with monthly cost, total drain, and per-row tap action: add a "review/cancel" reminder for the 1st of next month, or convert into a tracked recurring expense.
+
+### Per-category drill-down
+
+Tapping a Budget category now opens a drill-down modal with the category icon/name, allocation status, a 6-month spend trend (small bar chart), this month's transactions in that category, and an "Edit Budget" button. Edit/Delete moved here from the previous v5 direct-tap-to-edit behavior. Cleaner because you read first, edit second.
+
+## Changes Logged For Build v9 (2026-04-29) — Finance Pack 2: What If trio
+
+### Scenario comparison in OK to Buy
+
+The OK to Buy card has a "+ Compare" button that reveals a second Option B column with the same inputs. With both filled in, El shows a verdict block underneath: which one wins, the score gap, monthly-payment difference, and total-cost difference. If the gap is under 10 points, the verdict says "basically a wash, pick the one you actually want."
+
+### Life Goal Projection
+
+New What If card. Pick a goal type (Retire at age / Buy a home / Custom target), enter the target, your current age, monthly savings rate, and return assumption. El runs FV math from your live `savings + accounts` starting balance and tells you: projected end value, gap to target, and what monthly savings rate would actually hit the goal. Retirement uses 25× annual expenses as the target nest egg.
+
+### Debt vs Invest narrative
+
+New What If card with a plain-English read on every tracked debt. Categorizes each by APR vs my return assumption: "above" → pay first (with monthly interest cost), "near" → toss-up, "below" → pay min and invest the rest. If a key is configured, "Ask El for personalized advice" sends a focused chat-style question to the auto-routed model and renders the structured Verdict / Why / Before you decide / Best plan response inline.
 
 ## Next Conversations
 

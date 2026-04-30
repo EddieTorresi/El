@@ -80,7 +80,7 @@ Conversation history is saved to `d.aiHistory` (last 40 messages) via `El.ai.sav
 
 ---
 
-## Current Features (as of 2026-04-29 build v4)
+## Current Features (as of 2026-04-29 build v9)
 
 - **Home screen:** Capture card with natural language input + voice/mic button, daily command center (today/tomorrow/next action), greeting with financial summary, **30-day backup-reminder banner** (v3) that disappears when `d.settings.lastExportAt` is fresh, **API-key-required banner** (v3) inside the capture card when `El.ai.isConfigured()` is false.
 - **Finance tab:** Transactions, recurring expenses and income, debts, savings goals, net worth tracking, budget categories.
@@ -161,6 +161,19 @@ If any of these are missing, **do not commit**. Restore with `git checkout -- in
 | Auto model routing | (v4) | `pickClaudeModel()` / `pickOpenAiModel()` route based on message length and intent. Defaults to "auto" for new users. |
 | Anthropic prompt caching | (v4) | System prompt split into static (cached, ~10% cost on repeat) + dynamic blocks. Combined with data caps, drops typical second-message input cost by 70-90%. |
 | Latest model support | (v4) | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5; OpenAI GPT-4.1 / 4o / 4.1-mini / 4o-mini all selectable. |
+| Tappable per-category budget editing + Reset all | (v5) | Categories tappable; "Reset all" zeroes legacy demo carryover. |
+| Auto model migration | (v6) | Pre-v4 saved models flipped to 'auto' on first v4+ load. |
+| Weight log + 30-day trend | (v7) | New `d.weightLog[]`, Fitness-tab card with sparkline, modal-log-weight, replaces same-date entry. |
+| Workout last-set memory + PR nudge | (v7) | `finishWorkout()` now stores `exerciseDetail[]` per session; `startWorkout()` shows "Last: 3x10@135 / PR: 145" and prefills weights. PR toast on session save. |
+| Workout-to-calendar schedule | (v7) | `📅` button per template + `modal-schedule-workout`. Picks day(s) of week + time + weeks (default 12) and adds events. After-finish prompt offers calendar add. |
+| Spending velocity Home widget | (v8) | Daily-pace projection vs total budget or 70% of income. |
+| What changed Monday card | (v8) | Mondays only — week-over-week spend delta, top-shifted category, net-worth delta, upcoming bills. |
+| Smart budget suggestion | (v8) | Banner on Home when income > 0 and totalAllocated == 0. One-tap 50/30/20 by name match. `d.settings.smartBudgetDismissed` for dismiss state. |
+| Subscription tracker | (v8) | `El.finance.detectSubscriptions()` detects 3+ similar amounts ~30 days apart. New Budget-tab section. Tap to add a review reminder or convert to recurring. |
+| Per-category drill-down | (v8) | Tap a category → `modal-cat-drilldown` with 6-month trend bars + this-month transactions + Edit button. Edit/Delete now live inside the drill-down. |
+| Scenario comparison in OK to Buy | (v9) | "+ Compare" toggle reveals Option B column. Side-by-side verdicts + diff summary. |
+| Life-goal projection | (v9) | New What If card. Retire / house / custom goal types. FV math against starting savings + monthly contributions. |
+| Debt vs invest narrative | (v9) | New What If card. Local categorization (above / near / below return assumption) plus optional "Ask El for personalized advice" → `El.ai.narrateDebtVsInvest()`. |
 
 ---
 

@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29-bug-fixes-v7 fitness-pack weight-log last-set-memory pr-nudge workout-schedule -->
+<!-- El fix build: 2026-04-29-bug-fixes-v9 whatif-trio scenario-compare life-goals debt-vs-invest-narrative -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-04-29-bug-fixes-v7';</script>
+<script>window.EL_BUILD = '2026-04-29-bug-fixes-v9';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -1367,6 +1367,13 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-cat-drilldown" onclick="if(event.target===this)El.ui.closeModal('modal-cat-drilldown')">
+  <div class="modal" style="max-height:85vh;overflow-y:auto">
+    <div class="modal-handle"></div>
+    <div id="cat-drilldown-body"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-health-breakdown" onclick="if(event.target===this)El.ui.closeModal('modal-health-breakdown')">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -1874,6 +1881,95 @@ const El = {
           </div>
         </div>
 
+        ${(()=>{
+          // Spending velocity widget — only shows when there's been spending this month.
+          if (spent <= 0) return '';
+          const nowD = new Date();
+          const dayOfMonth = nowD.getDate();
+          const totalDays = new Date(nowD.getFullYear(), nowD.getMonth()+1, 0).getDate();
+          const daily = spent / dayOfMonth;
+          const projected = daily * totalDays;
+          const totalAllocated = (d.budget.categories||[]).reduce((s,c)=>s+(c.allocated||0),0);
+          const target = totalAllocated || (income * 0.7);
+          const overUnderPct = target > 0 ? ((projected - target) / target) * 100 : 0;
+          const status = projected <= target ? 'green' : overUnderPct < 10 ? 'orange' : 'red';
+          const statusColor = status==='green' ? 'var(--teal)' : status==='orange' ? 'var(--orange)' : 'var(--red)';
+          const statusBg = status==='green' ? 'var(--teal-glow)' : status==='orange' ? 'rgba(255,159,67,0.1)' : 'var(--red-glow)';
+          const verdict = status==='green'
+            ? `On pace — projected <b>${El.fmt(projected)}</b> by month-end (target ${El.fmt(target)})`
+            : `Pace puts you at <b>${El.fmt(projected)}</b> by month-end — ${overUnderPct.toFixed(0)}% over your ${target===totalAllocated?'budget':'70% of income'} of ${El.fmt(target)}`;
+          return `<div class="card fade-in" style="background:${statusBg};border-color:${statusColor}">
+            <div class="card-header"><div class="card-title">📊 Spending Velocity</div><span style="font-size:11px;color:var(--text3)">day ${dayOfMonth} of ${totalDays}</span></div>
+            <div style="font-size:13px;color:var(--text);line-height:1.6">${verdict}</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:6px">Avg <b>${El.fmt(daily)}/day</b> so far</div>
+          </div>`;
+        })()}
+
+        ${(()=>{
+          // What changed (Mon only by default; show today only on Mondays).
+          if (nowD.getDay() !== 1) return '';
+          const ms7 = 7 * 86400000;
+          const startThisWeek = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - 7);
+          const startLastWeek = new Date(startThisWeek.getTime() - ms7);
+          const inRange = (date, from, to) => date >= El.dateKey(from) && date < El.dateKey(to);
+          const txns = d.budget.transactions || [];
+          const sumExpenses = (from, to) => txns
+            .filter(t => t.type === 'expense' && inRange(t.date, from, to))
+            .reduce((s,t)=>s+t.amount,0);
+          const thisWeekSpend = sumExpenses(startThisWeek, nowD);
+          const lastWeekSpend = sumExpenses(startLastWeek, startThisWeek);
+          if (thisWeekSpend === 0 && lastWeekSpend === 0) return '';
+          const pct = lastWeekSpend > 0 ? Math.round(((thisWeekSpend - lastWeekSpend) / lastWeekSpend) * 100) : null;
+          // Top changed category
+          const byCat = {};
+          txns.filter(t => t.type === 'expense' && inRange(t.date, startThisWeek, nowD))
+            .forEach(t => { byCat[t.category] = (byCat[t.category]||0) + t.amount; });
+          const lastByCat = {};
+          txns.filter(t => t.type === 'expense' && inRange(t.date, startLastWeek, startThisWeek))
+            .forEach(t => { lastByCat[t.category] = (lastByCat[t.category]||0) + t.amount; });
+          let topCatName = '', topCatDelta = 0;
+          (d.budget.categories||[]).forEach(c => {
+            const delta = (byCat[c.id]||0) - (lastByCat[c.id]||0);
+            if (Math.abs(delta) > Math.abs(topCatDelta)) { topCatDelta = delta; topCatName = c.name; }
+          });
+          // Net worth delta
+          const hist = d.netWorthHistory || [];
+          const last = hist.length ? hist[hist.length-1].value : 0;
+          const weekAgoEntry = hist.find(h => h.date >= El.dateKey(startThisWeek));
+          const nwDelta = weekAgoEntry ? last - weekAgoEntry.value : 0;
+          // Upcoming bills next 7 days
+          const billsNext = (d.debts || []).filter(b => b.dueDay && El.daysUntil(b.dueDay) <= 7).length;
+          return `<div class="card fade-in" style="border-color:var(--primary);background:rgba(124,106,255,0.05)">
+            <div class="card-header"><div class="card-title">📈 What changed this week</div><span style="font-size:11px;color:var(--text3)">vs last week</span></div>
+            <div style="font-size:13px;color:var(--text2);line-height:1.7">
+              Spent <b>${El.fmt(thisWeekSpend)}</b>${pct!==null ? ` — <span style="color:${pct>0?'var(--red)':'var(--teal)'}">${pct>0?'+':''}${pct}%</span>` : ''}.
+              ${topCatName ? ` Biggest swing: <b>${topCatName}</b> ${topCatDelta>=0?'+':''}${El.fmt(topCatDelta)}.` : ''}
+              ${nwDelta !== 0 ? ` Net worth <span style="color:${nwDelta>=0?'var(--teal)':'var(--red)'}">${nwDelta>=0?'+':''}${El.fmt(nwDelta)}</span>.` : ''}
+              ${billsNext > 0 ? ` <b>${billsNext}</b> bill${billsNext!==1?'s':''} due this week.` : ''}
+            </div>
+          </div>`;
+        })()}
+
+        ${(()=>{
+          // Smart budget suggestion — only when income > 0 and no allocations exist yet.
+          const totalAllocated = (d.budget.categories||[]).reduce((s,c)=>s+(c.allocated||0),0);
+          if (income <= 0 || totalAllocated > 0) return '';
+          if (d.settings && d.settings.smartBudgetDismissed) return '';
+          return `<div class="card fade-in" style="border-color:var(--teal);background:var(--teal-glow)">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="font-size:24px">💡</div>
+              <div style="flex:1">
+                <div style="font-weight:700;color:var(--text)">Set up your budget in one tap</div>
+                <div style="font-size:12px;color:var(--text2);margin-top:2px;line-height:1.4">El can apply a 50/30/20 split to your existing categories from your ${El.fmt(income)}/mo income. You can tweak it after.</div>
+                <div style="display:flex;gap:8px;margin-top:10px">
+                  <button onclick="El.finance.applySmartBudget()" style="background:var(--teal);color:#000;border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer">Apply 50/30/20</button>
+                  <button onclick="El.finance.dismissSmartBudget()" style="background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer">Dismiss</button>
+                </div>
+              </div>
+            </div>
+          </div>`;
+        })()}
+
         ${upcomingBills.length ? `
         <div class="card fade-in">
           <div class="card-header"><div class="card-title">Upcoming Bills</div><button class="card-action" onclick="El.nav.go('finance')">View All</button></div>
@@ -1985,11 +2081,11 @@ const El = {
                 <button class="card-action" onclick="El.finance.openCategoryAdd()">+ Add</button>
               </div>
             </div>
-            <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Tap a category to set or change its monthly budget.</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Tap a category to see its transactions, trend, and edit its budget.</div>
             ${d.budget.categories.map(c=>{
               const spent = spentBycat[c.id]||0;
               const pct = c.allocated>0?Math.min(100,(spent/c.allocated)*100):0;
-              return `<div style="margin-bottom:14px;cursor:pointer" onclick="El.finance.openCategoryEdit('${c.id}')">
+              return `<div style="margin-bottom:14px;cursor:pointer" onclick="El.finance.openCategoryDrilldown('${c.id}')">
                 <div style="display:flex;justify-content:space-between;margin-bottom:6px">
                   <div style="display:flex;align-items:center;gap:8px"><span>${c.icon}</span><span style="font-weight:600">${c.name}</span></div>
                   <div style="font-size:13px;color:var(--text2)">${c.allocated>0?El.fmt(spent)+' / '+El.fmt(c.allocated):'<span style="color:var(--text3)">tap to set budget</span>'}</div>
@@ -1998,6 +2094,31 @@ const El = {
               </div>`;
             }).join('')}
           </div>
+
+          ${(()=>{
+            // Subscription tracker — auto-detected from transactions.
+            const subs = El.finance.detectSubscriptions(d.budget.transactions || []);
+            if (!subs.length) return '';
+            const monthlyTotal = subs.reduce((s,x)=>s+x.amount, 0);
+            return `<div class="card">
+              <div class="card-header">
+                <div class="card-title">🔁 Subscriptions</div>
+                <span style="font-size:13px;color:var(--text2)">${El.fmt(monthlyTotal)}/mo</span>
+              </div>
+              <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Auto-detected recurring charges (3+ similar amounts spaced ~30 days). Tap to mark or remind.</div>
+              ${subs.map(sub => `
+                <div class="list-item" onclick="El.finance.openSubscriptionAction('${sub.key.replace(/'/g, '&apos;')}', ${sub.amount.toFixed(2)})" style="cursor:pointer">
+                  <div class="list-icon" style="background:var(--bg3);font-size:18px">🔁</div>
+                  <div class="list-content">
+                    <div class="list-title">${sub.name}</div>
+                    <div class="list-sub">${sub.occurrences} hits · last ${sub.lastDate} · every ${Math.round(sub.avgGap)} days</div>
+                  </div>
+                  <div class="list-amount neg">${El.fmt(sub.amount)}</div>
+                </div>
+              `).join('')}
+            </div>`;
+          })()}
+
           <div class="card">
             <div class="card-header"><div class="card-title">Transactions</div><button class="card-action" onclick="El.ui.openModal('modal-add-transaction')">+ Add</button></div>
             <div style="display:flex;gap:8px;margin-bottom:10px">
@@ -2313,39 +2434,125 @@ const El = {
 
           <!-- OK TO BUY -->
           <div class="card" style="margin-top:4px">
-            <div class="card-header"><div class="card-title">🛒 OK to Buy?</div></div>
+            <div class="card-header">
+              <div class="card-title">🛒 OK to Buy?</div>
+              <button id="ob-compare-toggle" class="card-action" onclick="El.ui.toggleCompare()">+ Compare</button>
+            </div>
             <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Tell El what you're thinking of buying. Verdict is instant from your data — tap "Ask El" for a deeper take.</div>
-            <div class="form-row">
-              <div class="form-group"><label class="form-label">Item</label>
-                <input class="form-input" id="ob-item" placeholder="e.g. Toyota Camry" oninput="El.ui.updateOkToBuy()">
-              </div>
-              <div class="form-group"><label class="form-label">Price ($)</label>
-                <input class="form-input" id="ob-price" placeholder="e.g. 30000" type="number" oninput="El.ui.updateOkToBuy()">
-              </div>
-            </div>
-            <div class="form-group" style="display:flex;align-items:center;gap:12px;padding:6px 0">
-              <input type="checkbox" id="ob-finance" style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer" onchange="El.ui.toggleOkToBuyFinance()">
-              <label for="ob-finance" style="font-size:14px;color:var(--text);cursor:pointer">Financed (loan)</label>
-            </div>
-            <div id="ob-finance-fields" style="display:none">
+
+            <!-- OPTION A (always visible) -->
+            <div id="ob-block-a">
+              <div id="ob-label-a" style="font-size:11px;color:var(--text3);letter-spacing:0.4px;margin-bottom:6px;display:none">OPTION A</div>
               <div class="form-row">
-                <div class="form-group"><label class="form-label">Down Payment ($)</label>
-                  <input class="form-input" id="ob-down" value="0" type="number" oninput="El.ui.updateOkToBuy()">
+                <div class="form-group"><label class="form-label">Item</label>
+                  <input class="form-input" id="ob-item" placeholder="e.g. Toyota Camry" oninput="El.ui.updateOkToBuy()">
                 </div>
-                <div class="form-group"><label class="form-label">Term (months)</label>
-                  <input class="form-input" id="ob-months" value="60" type="number" oninput="El.ui.updateOkToBuy()">
+                <div class="form-group"><label class="form-label">Price ($)</label>
+                  <input class="form-input" id="ob-price" placeholder="e.g. 30000" type="number" oninput="El.ui.updateOkToBuy()">
                 </div>
               </div>
-              <div class="form-group"><label class="form-label">APR (%)</label>
-                <input class="form-input" id="ob-apr" value="6.9" type="number" oninput="El.ui.updateOkToBuy()">
+              <div class="form-group" style="display:flex;align-items:center;gap:12px;padding:6px 0">
+                <input type="checkbox" id="ob-finance" style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer" onchange="El.ui.toggleOkToBuyFinance()">
+                <label for="ob-finance" style="font-size:14px;color:var(--text);cursor:pointer">Financed (loan)</label>
               </div>
+              <div id="ob-finance-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group"><label class="form-label">Down Payment ($)</label>
+                    <input class="form-input" id="ob-down" value="0" type="number" oninput="El.ui.updateOkToBuy()">
+                  </div>
+                  <div class="form-group"><label class="form-label">Term (months)</label>
+                    <input class="form-input" id="ob-months" value="60" type="number" oninput="El.ui.updateOkToBuy()">
+                  </div>
+                </div>
+                <div class="form-group"><label class="form-label">APR (%)</label>
+                  <input class="form-input" id="ob-apr" value="6.9" type="number" oninput="El.ui.updateOkToBuy()">
+                </div>
+              </div>
+              <div id="ob-result" style="margin-top:14px"></div>
             </div>
-            <div id="ob-result" style="margin-top:14px"></div>
+
+            <!-- OPTION B (revealed by Compare) -->
+            <div id="ob-block-b" style="display:none;border-top:1px solid var(--border);margin-top:14px;padding-top:14px">
+              <div style="font-size:11px;color:var(--text3);letter-spacing:0.4px;margin-bottom:6px">OPTION B</div>
+              <div class="form-row">
+                <div class="form-group"><label class="form-label">Item</label>
+                  <input class="form-input" id="obB-item" placeholder="e.g. Toyota 4Runner" oninput="El.ui.updateOkToBuy()">
+                </div>
+                <div class="form-group"><label class="form-label">Price ($)</label>
+                  <input class="form-input" id="obB-price" placeholder="e.g. 50000" type="number" oninput="El.ui.updateOkToBuy()">
+                </div>
+              </div>
+              <div class="form-group" style="display:flex;align-items:center;gap:12px;padding:6px 0">
+                <input type="checkbox" id="obB-finance" style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer" onchange="El.ui.toggleOkToBuyFinance()">
+                <label for="obB-finance" style="font-size:14px;color:var(--text);cursor:pointer">Financed (loan)</label>
+              </div>
+              <div id="obB-finance-fields" style="display:none">
+                <div class="form-row">
+                  <div class="form-group"><label class="form-label">Down Payment ($)</label>
+                    <input class="form-input" id="obB-down" value="0" type="number" oninput="El.ui.updateOkToBuy()">
+                  </div>
+                  <div class="form-group"><label class="form-label">Term (months)</label>
+                    <input class="form-input" id="obB-months" value="60" type="number" oninput="El.ui.updateOkToBuy()">
+                  </div>
+                </div>
+                <div class="form-group"><label class="form-label">APR (%)</label>
+                  <input class="form-input" id="obB-apr" value="6.9" type="number" oninput="El.ui.updateOkToBuy()">
+                </div>
+              </div>
+              <div id="obB-result" style="margin-top:14px"></div>
+            </div>
+
+            <div id="ob-comparison" style="margin-top:14px"></div>
+
             <button class="btn btn-outline" id="ob-ai-btn" style="margin-top:12px;display:none" onclick="El.ai.analyzePurchaseFromForm()">Ask El for deeper analysis</button>
             <div id="ob-ai-result" style="margin-top:14px"></div>
           </div>
+
+          <!-- LIFE GOAL PROJECTION -->
+          <div class="card" style="margin-top:4px">
+            <div class="card-header"><div class="card-title">🎯 Life Goal Projection</div></div>
+            <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Tell El where you want to be. It runs the math against your current trajectory and tells you what would have to change.</div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Goal Type</label>
+                <select class="form-select" id="lg-type" onchange="El.ui.onLifeGoalTypeChange()">
+                  <option value="retire">Retire at age…</option>
+                  <option value="house">Buy a home</option>
+                  <option value="custom">Custom target</option>
+                </select>
+              </div>
+              <div class="form-group"><label class="form-label" id="lg-target-label">Retire at age</label>
+                <input class="form-input" id="lg-target" type="number" value="55" oninput="El.ui.updateLifeGoal()">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label" id="lg-amount-label">Annual expenses needed</label>
+                <input class="form-input" id="lg-amount" type="number" value="60000" oninput="El.ui.updateLifeGoal()">
+              </div>
+              <div class="form-group"><label class="form-label">Current age</label>
+                <input class="form-input" id="lg-age" type="number" value="32" oninput="El.ui.updateLifeGoal()">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Monthly savings rate ($)</label>
+                <input class="form-input" id="lg-monthly" type="number" value="500" oninput="El.ui.updateLifeGoal()">
+              </div>
+              <div class="form-group"><label class="form-label">Return assumption (%)</label>
+                <input class="form-input" id="lg-return" type="number" value="7" oninput="El.ui.updateLifeGoal()">
+              </div>
+            </div>
+            <div id="lg-result" style="margin-top:14px"></div>
+          </div>
+
+          <!-- DEBT vs INVEST NARRATIVE -->
+          <div class="card" style="margin-top:4px">
+            <div class="card-header"><div class="card-title">🧠 Pay Off Debt or Invest?</div></div>
+            <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Plain-English read on what your real debts and savings rate suggest. Pulls live numbers from your data.</div>
+            <div id="dvi-narrative" style="margin-top:6px"></div>
+            <button class="btn btn-outline" id="dvi-ai-btn" style="margin-top:12px;display:none" onclick="El.ai.narrateDebtVsInvest()">Ask El for personalized advice</button>
+            <div id="dvi-ai-result" style="margin-top:14px"></div>
+          </div>
         `;
-        setTimeout(()=>{ El.ui.updateNewDebt(); El.ui.updateInvestVsDebt(); El.ui.updateGoalPlanner(); El.ui.updateBuyVsLoan(); El.ui.updateJobLoss(); El.ui.updateEmergencyImpact(); El.ui.updateOkToBuy(); }, 50);
+        setTimeout(()=>{ El.ui.updateNewDebt(); El.ui.updateInvestVsDebt(); El.ui.updateGoalPlanner(); El.ui.updateBuyVsLoan(); El.ui.updateJobLoss(); El.ui.updateEmergencyImpact(); El.ui.updateOkToBuy(); El.ui.updateLifeGoal(); El.ui.renderDebtVsInvestNarrative(); }, 50);
       }
     },
 
@@ -2915,32 +3122,55 @@ const El = {
       const span = document.querySelector('#edit-txn-recurring-wrap span');
       if (span) span.textContent = type==='income' ? 'Make this recurring income' : 'Make this a recurring expense';
     },
+    // Read inputs for one OK-to-Buy column. Prefix = '' for option A, 'B' for option B.
+    _readOkToBuyOption(prefix) {
+      const id = (suffix) => 'ob' + prefix + '-' + suffix;
+      return {
+        item:   document.getElementById(id('item'))?.value.trim() || '',
+        price:  parseFloat(document.getElementById(id('price'))?.value) || 0,
+        fin:    !!document.getElementById(id('finance'))?.checked,
+        down:   parseFloat(document.getElementById(id('down'))?.value) || 0,
+        months: parseFloat(document.getElementById(id('months'))?.value) || 0,
+        apr:    parseFloat(document.getElementById(id('apr'))?.value) || 0
+      };
+    },
+
     toggleOkToBuyFinance() {
-      const on = document.getElementById('ob-finance').checked;
-      const fields = document.getElementById('ob-finance-fields');
-      if (fields) fields.style.display = on ? 'block' : 'none';
+      ['', 'B'].forEach(p => {
+        const cb = document.getElementById('ob' + p + '-finance');
+        const fields = document.getElementById('ob' + p + '-finance-fields');
+        if (cb && fields) fields.style.display = cb.checked ? 'block' : 'none';
+      });
       this.updateOkToBuy();
     },
-    updateOkToBuy() {
-      const item    = document.getElementById('ob-item')?.value.trim() || '';
-      const price   = parseFloat(document.getElementById('ob-price')?.value) || 0;
-      const fin     = document.getElementById('ob-finance')?.checked;
-      const down    = fin ? (parseFloat(document.getElementById('ob-down')?.value) || 0) : 0;
-      const months  = fin ? (parseFloat(document.getElementById('ob-months')?.value) || 0) : 0;
-      const apr     = fin ? (parseFloat(document.getElementById('ob-apr')?.value) || 0) : 0;
-      const out     = document.getElementById('ob-result');
-      const aiBtn   = document.getElementById('ob-ai-btn');
-      const aiOut   = document.getElementById('ob-ai-result');
-      if (aiOut) aiOut.innerHTML = '';
-      if (!out) return;
-      if (!price) {
-        out.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:8px 0">Enter a price to see the verdict.</div>';
-        if (aiBtn) aiBtn.style.display = 'none';
-        return;
-      }
-      const r = El.finance.evaluateBuy({ price, downPayment: down, months, apr });
+
+    toggleCompare() {
+      const block = document.getElementById('ob-block-b');
+      const labelA = document.getElementById('ob-label-a');
+      const toggleBtn = document.getElementById('ob-compare-toggle');
+      if (!block) return;
+      const open = block.style.display === 'none';
+      block.style.display = open ? 'block' : 'none';
+      if (labelA) labelA.style.display = open ? 'block' : 'none';
+      if (toggleBtn) toggleBtn.textContent = open ? '× Hide B' : '+ Compare';
+      this.updateOkToBuy();
+    },
+
+    _renderOkToBuyOption(opts, outId) {
+      const out = document.getElementById(outId);
+      if (!out) return null;
       const flagColor = c => ({red:'var(--red)',orange:'var(--orange)',yellow:'var(--yellow)',green:'var(--teal)',gray:'var(--text3)'})[c] || 'var(--text2)';
       const fmtBold = t => El.ai.escapeHtml(t).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+      if (!opts.price) {
+        out.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:8px 0">Enter a price.</div>';
+        return null;
+      }
+      const r = El.finance.evaluateBuy({
+        price: opts.price,
+        downPayment: opts.fin ? opts.down : 0,
+        months: opts.fin ? opts.months : 0,
+        apr: opts.fin ? opts.apr : 0
+      });
       const flagsHtml = r.flags.map(f =>
         '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px">' +
           '<div style="width:6px;height:6px;border-radius:50%;background:'+flagColor(f.c)+';margin-top:7px;flex-shrink:0"></div>' +
@@ -2952,10 +3182,159 @@ const El = {
           <div style="font-size:12px;color:var(--text3)">score ${r.score}/100</div>
         </div>
         <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.6">
-          ${r.isCash ? 'Cash purchase: <b>'+El.fmt(r.totalCost)+'</b>' : 'Monthly payment: <b>'+El.fmt(r.monthlyPayment)+'</b> · Total over '+months+' mo: <b>'+El.fmt(r.totalCost)+'</b>'}
+          ${r.isCash ? 'Cash purchase: <b>'+El.fmt(r.totalCost)+'</b>' : 'Monthly payment: <b>'+El.fmt(r.monthlyPayment)+'</b> · Total over '+(opts.months||0)+' mo: <b>'+El.fmt(r.totalCost)+'</b>'}
         </div>
         ${flagsHtml || '<div style="color:var(--text3);font-size:13px">No flags — looks clean.</div>'}
       `;
+      return r;
+    },
+
+    updateOkToBuy() {
+      const aiOut = document.getElementById('ob-ai-result');
+      if (aiOut) aiOut.innerHTML = '';
+      const aiBtn = document.getElementById('ob-ai-btn');
+      const cmpOut = document.getElementById('ob-comparison');
+      if (cmpOut) cmpOut.innerHTML = '';
+
+      const a = this._readOkToBuyOption('');
+      const b = this._readOkToBuyOption('B');
+      const ra = this._renderOkToBuyOption(a, 'ob-result');
+
+      const compareOpen = document.getElementById('ob-block-b')?.style.display !== 'none';
+      let rb = null;
+      if (compareOpen) rb = this._renderOkToBuyOption(b, 'obB-result');
+
+      // Side-by-side comparison summary (only when both have prices).
+      if (ra && rb && cmpOut) {
+        const winner = ra.score >= rb.score ? 'A' : 'B';
+        const diff = Math.abs(ra.score - rb.score);
+        const winLabel = winner === 'A' ? (a.item || 'Option A') : (b.item || 'Option B');
+        const monthlyDelta = (rb.monthlyPayment || 0) - (ra.monthlyPayment || 0);
+        const totalDelta = (rb.totalCost || 0) - (ra.totalCost || 0);
+        cmpOut.innerHTML = `
+          <div style="background:rgba(124,106,255,0.06);border:1px solid var(--primary);border-radius:12px;padding:12px 14px">
+            <div style="font-size:12px;color:var(--text3);letter-spacing:0.4px;margin-bottom:6px">VERDICT</div>
+            <div style="font-size:16px;font-weight:800;color:var(--text)">${El.ai.escapeHtml(winLabel)} wins</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:6px;line-height:1.6">
+              Score gap: <b>${diff}</b> points (${ra.score} vs ${rb.score}).${' '}
+              ${a.fin || b.fin ? 'Monthly difference: <b>' + (monthlyDelta>=0?'+':'') + El.fmt(monthlyDelta) + '</b>. ' : ''}
+              Total cost difference: <b>${totalDelta>=0?'+':''}${El.fmt(totalDelta)}</b>${diff < 10 ? ' — basically a wash, pick the one you actually want.' : '.'}
+            </div>
+          </div>
+        `;
+      }
+
+      if (aiBtn) aiBtn.style.display = (a.price && El.ai && El.ai.isConfigured && El.ai.isConfigured()) ? 'inline-flex' : 'none';
+    },
+
+    onLifeGoalTypeChange() {
+      const t = document.getElementById('lg-type').value;
+      const tLabel = document.getElementById('lg-target-label');
+      const target = document.getElementById('lg-target');
+      const aLabel = document.getElementById('lg-amount-label');
+      const a = document.getElementById('lg-amount');
+      if (t === 'retire')      { tLabel.textContent = 'Retire at age';     target.value = target.value || 55;  aLabel.textContent = 'Annual expenses needed'; a.value = a.value || 60000; }
+      else if (t === 'house')  { tLabel.textContent = 'Buy in (years)';    target.value = 3;                   aLabel.textContent = 'Down payment target ($)'; a.value = 60000; }
+      else                     { tLabel.textContent = 'Target year';       target.value = new Date().getFullYear() + 5; aLabel.textContent = 'Target amount ($)'; a.value = 100000; }
+      this.updateLifeGoal();
+    },
+
+    updateLifeGoal() {
+      const out = document.getElementById('lg-result');
+      if (!out) return;
+      const type = document.getElementById('lg-type').value;
+      const targetRaw = parseFloat(document.getElementById('lg-target').value) || 0;
+      const amount = parseFloat(document.getElementById('lg-amount').value) || 0;
+      const age = parseFloat(document.getElementById('lg-age').value) || 0;
+      const monthly = parseFloat(document.getElementById('lg-monthly').value) || 0;
+      const ret = parseFloat(document.getElementById('lg-return').value) || 0;
+      if (!amount || (type !== 'house' && targetRaw <= 0) || (type !== 'house' && type !== 'retire' && targetRaw <= new Date().getFullYear())) {
+        out.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">Fill in the inputs above.</div>';
+        return;
+      }
+      // Years to goal.
+      let years;
+      if (type === 'retire')     years = Math.max(0, targetRaw - age);
+      else if (type === 'house') years = Math.max(0, targetRaw);
+      else                       years = Math.max(0, targetRaw - new Date().getFullYear());
+
+      // Target nest egg: retire → 25× annual expenses; house/custom → amount itself.
+      const targetSum = (type === 'retire') ? amount * 25 : amount;
+
+      // Existing liquid net worth (savings + accounts).
+      const d = El.state.get();
+      const startSavings = (d.savings||[]).reduce((s,x)=>s+(x.current||0),0)
+                        + (d.accounts||[]).reduce((s,x)=>s+(x.balance||0),0);
+
+      // FV of starting savings + monthly contributions at given return.
+      const months = years * 12;
+      const r = (ret/100) / 12;
+      const fvLump = startSavings * Math.pow(1 + r, months);
+      const fvCont = r > 0 ? monthly * ((Math.pow(1 + r, months) - 1) / r) : monthly * months;
+      const projected = fvLump + fvCont;
+
+      // What monthly savings would actually hit the target?
+      let needed = 0;
+      if (months > 0) {
+        const needFromContribs = Math.max(0, targetSum - fvLump);
+        needed = r > 0 ? needFromContribs / ((Math.pow(1 + r, months) - 1) / r) : needFromContribs / months;
+      }
+
+      const onTrack = projected >= targetSum;
+      const diff = projected - targetSum;
+      const verdict = onTrack ? 'On track' : 'Off track';
+      const verdictColor = onTrack ? 'var(--teal)' : 'var(--red)';
+      const niceTarget = type === 'retire'
+        ? 'Retire at ' + targetRaw + ' (need ~' + El.fmt(targetSum) + ')'
+        : type === 'house'
+          ? 'Down payment in ' + years + ' year' + (years!==1?'s':'') + ' (' + El.fmt(targetSum) + ')'
+          : 'Reach ' + El.fmt(targetSum) + ' by ' + targetRaw;
+
+      out.innerHTML = `
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px">
+          <div style="font-size:20px;font-weight:800;color:${verdictColor}">${verdict}</div>
+          <div style="font-size:12px;color:var(--text3)">${years} yr · ${ret}% return</div>
+        </div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">${niceTarget}.<br>
+          Projected at this rate: <b>${El.fmt(projected)}</b> (${diff>=0?'+':''}${El.fmt(diff)} vs target).<br>
+          ${onTrack
+            ? `You could even drop monthly savings to <b>${El.fmt(Math.max(0,needed))}</b> and still hit the goal.`
+            : `To get on track, save <b>${El.fmt(needed)}/mo</b> instead of <b>${El.fmt(monthly)}/mo</b> — a difference of <b>${El.fmt(needed - monthly)}/mo</b>.`}
+        </div>
+      `;
+    },
+
+    renderDebtVsInvestNarrative() {
+      const out = document.getElementById('dvi-narrative');
+      const aiBtn = document.getElementById('dvi-ai-btn');
+      if (!out) return;
+      const d = El.state.get();
+      const debts = (d.debts || []).filter(x => x.balance > 0);
+      const ret = (d.assumptions && d.assumptions.returnRate) || 7;
+      if (!debts.length) {
+        out.innerHTML = '<div style="font-size:13px;color:var(--text2);line-height:1.6">No tracked debts. Any extra cash can go straight into investing — at <b>' + ret + '%</b> annual return, your future self will thank you.</div>';
+        if (aiBtn) aiBtn.style.display = (El.ai && El.ai.isConfigured && El.ai.isConfigured()) ? 'inline-flex' : 'none';
+        return;
+      }
+      // Categorize debts vs the investment-return hurdle.
+      const above = debts.filter(x => (x.apr || 0) > ret);
+      const near  = debts.filter(x => Math.abs((x.apr||0) - ret) <= 1);
+      const below = debts.filter(x => (x.apr || 0) < ret - 1);
+      const totalAbove = above.reduce((s,x)=>s+x.balance, 0);
+      const monthlyInterestAbove = above.reduce((s,x)=>s + (x.balance * (x.apr/100/12)), 0);
+
+      const lines = [];
+      lines.push(`Your investment-return assumption is <b>${ret}%</b>. Each debt is "expensive" if its APR is higher than that.`);
+      if (above.length) {
+        lines.push(`<b>Pay these off first</b> (APR &gt; ${ret}%): ${above.map(x=>El.ai.escapeHtml(x.name)+' '+x.apr+'%').join(', ')}. Together that's <b>${El.fmt(totalAbove)}</b> bleeding ~<b>${El.fmt(monthlyInterestAbove)}/mo</b> in interest. Every dollar paid here is a guaranteed ${Math.round(above[0].apr)}% "return".`);
+      }
+      if (near.length) {
+        lines.push(`<b>Toss-up</b> (APR ~${ret}%): ${near.map(x=>El.ai.escapeHtml(x.name)+' '+x.apr+'%').join(', ')}. Mathematically a wash — pick whichever helps you sleep at night.`);
+      }
+      if (below.length) {
+        lines.push(`<b>Pay only the minimum, invest the rest</b> (APR &lt; ${ret}%): ${below.map(x=>El.ai.escapeHtml(x.name)+' '+x.apr+'%').join(', ')}. You'll come out ahead by investing the difference.`);
+      }
+      out.innerHTML = '<div style="font-size:13px;color:var(--text2);line-height:1.7">' + lines.map(l => '<div style="margin-bottom:8px">' + l + '</div>').join('') + '</div>';
       if (aiBtn) aiBtn.style.display = (El.ai && El.ai.isConfigured && El.ai.isConfigured()) ? 'inline-flex' : 'none';
     },
     drawHealthRing(score, color) {
@@ -3695,6 +4074,198 @@ const El = {
       // Refresh calendar if currently visible so the new recurring expense shows
       if (El.nav.current === 'schedule') El.schedule.renderCalendar();
     },
+    // ── Auto-detect recurring subscriptions from transaction history.
+    // Looks for groups of expense transactions that share a description,
+    // have stable amounts (within 15%), and recur roughly monthly (25-35d gaps).
+    detectSubscriptions(transactions) {
+      const expenses = (transactions || []).filter(t => t.type === 'expense' && t.description);
+      const groups = {};
+      expenses.forEach(t => {
+        const k = String(t.description).toLowerCase().trim();
+        (groups[k] = groups[k] || []).push(t);
+      });
+      const out = [];
+      for (const k in groups) {
+        const txns = groups[k].slice().sort((a,b) => a.date < b.date ? -1 : 1);
+        if (txns.length < 3) continue;
+        const amounts = txns.map(t => t.amount);
+        const avg = amounts.reduce((s,v)=>s+v, 0) / amounts.length;
+        if (avg <= 0) continue;
+        const maxDev = Math.max(...amounts.map(a => Math.abs(a - avg)));
+        if (maxDev / avg > 0.15) continue;
+        let totalGap = 0;
+        for (let i = 1; i < txns.length; i++) {
+          totalGap += (new Date(txns[i].date) - new Date(txns[i-1].date)) / 86400000;
+        }
+        const avgGap = totalGap / (txns.length - 1);
+        if (avgGap < 25 || avgGap > 35) continue;
+        out.push({
+          key: k,
+          name: txns[0].description,
+          amount: avg,
+          lastDate: txns[txns.length - 1].date,
+          occurrences: txns.length,
+          avgGap
+        });
+      }
+      return out.sort((a,b) => b.amount - a.amount);
+    },
+
+    // Tapping a detected subscription offers actions: schedule a "review" reminder
+    // (so future-you re-evaluates) or convert to an explicit recurring expense.
+    openSubscriptionAction(key, amount) {
+      const choice = prompt(
+        'Subscription: ' + key + '\n\nWhat would you like to do?\n\n' +
+        '1 — Add a "review/cancel" reminder for the 1st of next month\n' +
+        '2 — Convert to a tracked recurring expense\n' +
+        'Anything else / cancel — close',
+        '1'
+      );
+      if (!choice) return;
+      const d = El.state.get();
+      if (choice.trim() === '1') {
+        if (!d.events) d.events = [];
+        const t = new Date(); t.setMonth(t.getMonth() + 1); t.setDate(1);
+        d.events.push({
+          id: El.uid(),
+          title: '🔁 Review subscription: ' + key,
+          type: 'reminder',
+          date: El.dateKey(t),
+          time: '09:00',
+          notes: 'Auto-detected ~' + El.fmt(amount) + '/mo. Decide: keep / cancel / replace.',
+          gcal_url: null
+        });
+        El.state.save();
+        El.ui.showToast('Reminder added for ' + El.dateKey(t), 'success');
+      } else if (choice.trim() === '2') {
+        if (!d.recurring) d.recurring = [];
+        d.recurring.push({
+          id: El.uid(),
+          description: key,
+          amount,
+          frequency: 'monthly',
+          category: ((d.budget && d.budget.categories && d.budget.categories[0] && d.budget.categories[0].id) || 'cat5'),
+          nextDate: El.today()
+        });
+        El.state.save();
+        El.ui.showToast('Added to recurring expenses', 'success');
+        if (El.nav.current === 'finance') El.render.financeTab('budget');
+      }
+    },
+
+    // Apply a 50/30/20 starter budget to existing categories by name match.
+    applySmartBudget() {
+      const d = El.state.get();
+      const income = El.getIncome(d);
+      if (!income || income <= 0) return;
+      const cats = d.budget.categories || [];
+      // Percent of income per category type.
+      const rules = [
+        { test: /housing|rent|mortgage/i, pct: 30 },
+        { test: /food|grocer|restaurant|dining/i, pct: 12 },
+        { test: /transport|car|gas|fuel|uber|lyft/i, pct: 8 },
+        { test: /utilit|electric|water|internet/i, pct: 5 },
+        { test: /health|medic|insurance/i, pct: 5 },
+        { test: /entertain|streaming|hobby/i, pct: 10 }
+      ];
+      let assigned = 0;
+      cats.forEach(c => {
+        const r = rules.find(r => r.test.test(c.name));
+        if (r) { c.allocated = Math.round((income * r.pct) / 100); assigned++; }
+      });
+      El.state.save();
+      El.haptic('success');
+      El.ui.showToast(assigned + ' categor' + (assigned===1?'y':'ies') + ' set from 50/30/20', 'success');
+      El.render.home();
+    },
+
+    dismissSmartBudget() {
+      const d = El.state.get();
+      if (!d.settings) d.settings = {};
+      d.settings.smartBudgetDismissed = true;
+      El.state.save();
+      El.render.home();
+    },
+
+    // Per-category drill-down: tap a Budget category to see this month's
+    // transactions, a 6-month spend trend, and Edit/Delete buttons.
+    openCategoryDrilldown(id) {
+      const d = El.state.get();
+      const cat = (d.budget.categories || []).find(c => c.id === id);
+      if (!cat) return;
+      const body = document.getElementById('cat-drilldown-body');
+      if (!body) return;
+      const esc = s => El.ai.escapeHtml(String(s == null ? '' : s));
+
+      const allTxns = (d.budget.transactions || []).filter(t => t.category === id);
+      const ym = El.today().substr(0, 7);
+      const monthTxns = allTxns.filter(t => (t.date || '').startsWith(ym));
+      const monthSpent = monthTxns.filter(t => t.type === 'expense').reduce((s,t)=>s+t.amount, 0);
+
+      // 6-month trend.
+      const trend = [];
+      const now = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const ref = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = ref.getFullYear() + '-' + String(ref.getMonth()+1).padStart(2,'0');
+        const sum = allTxns
+          .filter(t => t.type === 'expense' && (t.date || '').startsWith(key))
+          .reduce((s,t)=>s+t.amount, 0);
+        trend.push({ label: ref.toLocaleDateString('en-US', { month: 'short' }), value: sum });
+      }
+      const maxV = Math.max(...trend.map(p=>p.value), 1);
+      const sparkPts = trend.map((p,i) => ((i / (trend.length-1)) * 240) + ',' + (60 - (p.value / maxV) * 50)).join(' ');
+      const sparkBars = trend.map((p,i) => {
+        const x = (i / trend.length) * 240;
+        const w = 240 / trend.length - 4;
+        const h = (p.value / maxV) * 50;
+        return `<rect x="${x+2}" y="${60-h}" width="${w}" height="${h}" fill="${esc(cat.color)}" rx="2" opacity="0.55"/>`
+          + `<text x="${x + w/2 + 2}" y="74" fill="var(--text3)" font-size="9" text-anchor="middle">${p.label}</text>`;
+      }).join('');
+
+      const allocLine = cat.allocated > 0
+        ? El.fmt(monthSpent) + ' / ' + El.fmt(cat.allocated) + ' this month (' + Math.round((monthSpent/cat.allocated)*100) + '%)'
+        : 'No monthly budget set yet';
+
+      const txnRows = monthTxns.length
+        ? monthTxns.slice().sort((a,b) => a.date > b.date ? -1 : 1).map(t => `
+            <div class="list-item" style="padding:8px 0">
+              <div class="list-content">
+                <div class="list-title" style="font-size:13px">${esc(t.description || 'Transaction')}</div>
+                <div class="list-sub" style="font-size:11px">${esc(t.date)}</div>
+              </div>
+              <div class="list-amount ${t.type==='income'?'pos':'neg'}" style="font-size:13px">${t.type==='income'?'+':'-'}${El.fmt(t.amount)}</div>
+            </div>`).join('')
+        : '<div style="font-size:13px;color:var(--text3);padding:10px 0;text-align:center">No transactions in this category this month.</div>';
+
+      body.innerHTML = `
+        <div class="modal-handle"></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div style="font-size:28px">${esc(cat.icon)}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:18px;color:var(--text)">${esc(cat.name)}</div>
+            <div style="font-size:12px;color:var(--text2)">${allocLine}</div>
+          </div>
+        </div>
+        <div style="margin-top:14px;background:var(--bg);border-radius:12px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">6-month spend trend</div>
+          <svg viewBox="0 0 244 80" width="100%" style="display:block">
+            ${sparkBars}
+          </svg>
+        </div>
+        <div style="margin-top:14px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px;letter-spacing:0.3px">THIS MONTH</div>
+          ${txnRows}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn" onclick="El.ui.closeModal('modal-cat-drilldown');El.finance.openCategoryEdit('${cat.id}')" style="flex:1">Edit Budget</button>
+          <button class="btn btn-danger" onclick="El.ui.closeModal('modal-cat-drilldown');setTimeout(()=>El.finance.openCategoryEdit('${cat.id}'),200);setTimeout(()=>El.finance.deleteCategoryFromModal(),250)" style="display:none">Delete</button>
+        </div>
+        <button class="btn btn-outline" onclick="El.ui.closeModal('modal-cat-drilldown')" style="width:100%;margin-top:8px">Close</button>
+      `;
+      El.ui.openModal('modal-cat-drilldown');
+    },
+
     // Local OK-to-Buy verdict — pure heuristic, no API call.
     // Returns { score, verdict, verdictColor, flags[], monthlyPayment, totalCost, ...numbers }.
     evaluateBuy(opts) {
@@ -4677,6 +5248,35 @@ const El = {
         if (out) out.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px 0">⚠️ '+this.escapeHtml(e.message)+'</div>';
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Ask El for deeper analysis'; }
+      }
+    },
+    // Send the live debt-vs-invest snapshot to the configured AI for a tailored take.
+    async narrateDebtVsInvest() {
+      if (!this.isConfigured()) {
+        El.ui.showToast('Set up an API key in Settings → El AI Provider first.');
+        return;
+      }
+      const out = document.getElementById('dvi-ai-result');
+      const btn = document.getElementById('dvi-ai-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Asking El…'; }
+      if (out) out.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">El is thinking…</div>';
+      const question = `Looking at my live debt list and savings rate, should I be paying off debt aggressively, investing the difference, or splitting? Be specific to my numbers — name the debts and explain the math. Use the structured Verdict / Why / Before you decide / Best plan response shape.`;
+      try {
+        const d = El.state.get();
+        const provider = d.settings?.aiProvider;
+        const apiKey = (d.settings?.aiApiKey || '').trim();
+        const systemPrompt = this.buildSystemPrompt();
+        const reply = provider === 'claude'
+          ? await this.callClaude(apiKey, systemPrompt, question)
+          : await this.callOpenAI(apiKey, systemPrompt, question);
+        const cleaned = this.stripElActions(reply)
+          .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+          .replace(/\n/g, '<br>');
+        if (out) out.innerHTML = '<div style="background:var(--bg);border-radius:12px;padding:14px;font-size:14px;line-height:1.6;color:var(--text)">'+cleaned+'</div>';
+      } catch(e) {
+        if (out) out.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px 0">⚠️ '+this.escapeHtml(e.message)+'</div>';
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Ask El for personalized advice'; }
       }
     },
     // True only when the user has selected Claude/OpenAI AND saved an API key.
