@@ -8,7 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29 bug-fixes-v2 recurring-calendar modal-label swipe-dismiss ai-autoaction -->
+<!-- El fix build: 2026-04-29-bug-fixes-v3 health-score-rewrite ai-tab-gating xss-escape backup-reminder build-tag -->
+<!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
+<script>window.EL_BUILD = '2026-04-29-bug-fixes-v3';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -1307,10 +1309,34 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-health-breakdown" onclick="if(event.target===this)El.ui.closeModal('modal-health-breakdown')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Financial Health Breakdown</div>
+    <div id="health-breakdown-body"></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5">
+      Score is a weighted average of five components. Lower-scoring areas are the fastest wins.
+    </div>
+    <button class="btn" style="margin-top:12px" onclick="El.ui.closeModal('modal-health-breakdown')">Close</button>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════
 // EL — EVERYDAY LIFE APP
 // ═══════════════════════════════════════════
+
+// Stable list of starter budget categories. Outside El.state.defaults() so
+// it isn't rebuilt on every call. IDs are referenced by demo data and the
+// migrate() function — do not renumber.
+const DEFAULT_CATEGORIES = [
+  { id:'cat1', name:'Housing',       allocated:0, icon:'🏠', color:'#7c6aff' },
+  { id:'cat2', name:'Food',          allocated:0, icon:'🛒', color:'#00d4aa' },
+  { id:'cat3', name:'Transport',     allocated:0, icon:'🚗', color:'#ff9f43' },
+  { id:'cat4', name:'Utilities',     allocated:0, icon:'⚡', color:'#ffd32a' },
+  { id:'cat5', name:'Entertainment', allocated:0, icon:'🎬', color:'#ff4d6d' },
+  { id:'cat6', name:'Healthcare',    allocated:0, icon:'💊', color:'#a8ff78' }
+];
 
 const El = {
   // ── STATE ──────────────────────────────
@@ -1321,14 +1347,8 @@ const El = {
         profile: { name: '', income: 0, currency: 'USD', incomes: [], riskTolerance: 'moderate' },
         assumptions: { returnRate: 7, inflationRate: 3, taxRate: 22, emergencyMonths: 6, incomeGrowthRate: 2 },
         budget: {
-          categories: [
-            { id:'cat1', name:'Housing', allocated:0, icon:'🏠', color:'#7c6aff' },
-            { id:'cat2', name:'Food', allocated:0, icon:'🛒', color:'#00d4aa' },
-            { id:'cat3', name:'Transport', allocated:0, icon:'🚗', color:'#ff9f43' },
-            { id:'cat4', name:'Utilities', allocated:0, icon:'⚡', color:'#ffd32a' },
-            { id:'cat5', name:'Entertainment', allocated:0, icon:'🎬', color:'#ff4d6d' },
-            { id:'cat6', name:'Healthcare', allocated:0, icon:'💊', color:'#a8ff78' },
-          ],
+          // Deep-copy so callers can mutate without affecting the constant.
+          categories: DEFAULT_CATEGORIES.map(c => ({ ...c })),
           transactions: []
         },
         debts: [],
@@ -1504,6 +1524,9 @@ const El = {
     }
   },
 
+  // Toggle to true to surface diagnostic console.* calls.
+  debug: false,
+
   // ── INIT ───────────────────────────────
   init() {
     // Apply saved theme
@@ -1520,7 +1543,8 @@ const El = {
       const hist = d.netWorthHistory || [];
       if (!hist.length || hist[hist.length-1].date !== today) {
         hist.push({ date: today, value: nw });
-        if (hist.length > 90) hist.splice(0, hist.length - 90);
+        // Keep ~3 years of daily history for long-term trend charts.
+        if (hist.length > 1100) hist.splice(0, hist.length - 1100);
         d.netWorthHistory = hist;
         El.state.save();
       }
@@ -1529,6 +1553,7 @@ const El = {
     // Auto-generate recurring expenses for current month
     El.finance.processRecurring();
 
+    El.nav.refreshAiVisibility();
     El.nav.go('home');
     El.ai.init();
     setTimeout(() => El.ui.initModalSwipe(), 100);
@@ -1579,10 +1604,16 @@ const El = {
   // ── NAVIGATION ─────────────────────────
   nav: {
     current: 'home',
+    // Hide / show the El AI nav tab based on whether a real provider+key is configured.
+    refreshAiVisibility() {
+      const navBtn = document.getElementById('nav-ai');
+      if (!navBtn) return;
+      navBtn.style.display = El.ai.isConfigured() ? '' : 'none';
+    },
     go(screen) {
       const screenEl = document.getElementById('screen-' + screen);
       if (!screenEl) {
-        console.warn('El.nav.go: unknown screen', screen);
+        if (El.debug) console.warn('El.nav.go: unknown screen', screen);
         return;
       }
       document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -1607,7 +1638,9 @@ const El = {
   render: {
     home() {
       const d = El.state.get();
-      const score = El.finance.healthScore();
+      const healthDetail = El.finance.healthDetail();
+      const score = healthDetail.score;       // null when no data yet
+      const scoreGrade = healthDetail.grade;  // '—' when null
       const totalDebt = d.debts.reduce((s,x)=>s+x.balance,0);
       const totalSavings = d.savings.reduce((s,x)=>s+x.current,0);
       const now = new Date();
@@ -1617,8 +1650,8 @@ const El = {
       const upcomingBills = d.debts.filter(x=>x.dueDay).sort((a,b)=>El.daysUntil(a.dueDay)-El.daysUntil(b.dueDay)).slice(0,3);
       const todayStr = El.today();
       const todayEvents = d.events.filter(e=>e.date===todayStr).sort((a,b)=>a.time>b.time?1:-1);
-      const scoreColor = score>=80?'var(--teal)':score>=60?'#a8ff78':score>=40?'var(--yellow)':score>=20?'var(--orange)':'var(--red)';
-      const scoreGrade = score>=90?'A+':score>=80?'A':score>=70?'B':score>=60?'C':score>=50?'D':'F';
+      const scoreColor = score==null ? 'var(--text3)'
+        : score>=80?'var(--teal)':score>=60?'#a8ff78':score>=40?'var(--yellow)':score>=20?'var(--orange)':'var(--red)';
       const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowStr = El.dateKey(tomorrow);
       const tomorrowEvents = d.events.filter(e=>e.date===tomorrowStr).sort((a,b)=>a.time>b.time?1:-1);
@@ -1661,11 +1694,16 @@ const El = {
         <div class="card quick-capture-card fade-in">
           <div class="quick-capture-title">Capture</div>
           <div class="quick-capture-sub">Calendar, money, food, workouts, reminders, and messy thoughts.</div>
+          ${!El.ai.isConfigured() ? `
+            <div onclick="El.nav.go('settings')" style="cursor:pointer;background:rgba(124,106,255,0.08);border:1px solid rgba(124,106,255,0.25);border-radius:12px;padding:10px 12px;margin:6px 0 10px;font-size:12px;color:var(--text2);line-height:1.4">
+              <b style="color:var(--primary)">Add an API key to unlock smart capture.</b><br>
+              Without it, capture won\'t parse natural language like "dentist Thu 2pm" or log expenses automatically. Tap to open Settings → El AI Provider.
+            </div>` : ''}
           <div class="quick-capture-row">
             <textarea class="quick-capture-input" id="quick-capture-input" rows="1" placeholder="Dentist next Thu at 2pm"
               onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();El.ai.quickCapture();}"
               oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,96)+'px'"></textarea>
-            <button class="chat-mic" id="capture-mic-btn" onclick="El.ai.toggleCaptureSpeech()" title="Voice input" style="display:none">🎤</button>
+            <button class="chat-mic" id="capture-mic-btn" onclick="El.ai.toggleCaptureSpeech()" title="Voice input">🎤</button>
             <button class="quick-capture-send" onclick="El.ai.quickCapture()">+</button>
           </div>
           <div class="quick-capture-chips">
@@ -1691,13 +1729,46 @@ const El = {
           </div>
         </div>
 
-        <div class="card fade-in">
-          <div class="card-header"><div class="card-title">Financial Health</div><span class="pill pill-${score>=60?'green':'red'}">${scoreGrade}</span></div>
+        ${(()=>{
+          // Backup-reminder banner — shows after 30 days without an export, or
+          // immediately if the user has meaningful data and has never exported.
+          const last = d.settings && d.settings.lastExportAt;
+          const hasMeaningfulData =
+            (d.budget.transactions||[]).length >= 5 ||
+            (d.debts||[]).length > 0 ||
+            (d.savings||[]).length > 0;
+          if (!hasMeaningfulData) return '';
+          let daysSince = Infinity;
+          if (last) {
+            const lastD = new Date(last + 'T12:00:00');
+            daysSince = Math.floor((new Date() - lastD) / 86400000);
+          }
+          if (daysSince < 30) return '';
+          const msg = last
+            ? 'It\'s been ' + daysSince + ' days since your last backup. Local data can disappear if you reinstall or clear site data.'
+            : 'Your data only lives in this browser. Export a JSON backup before something goes wrong.';
+          return `<div class="card fade-in" style="border:1px solid rgba(255,159,67,0.35);background:rgba(255,159,67,0.06);cursor:pointer" onclick="El.nav.go('settings')">
+            <div style="display:flex;align-items:center;gap:12px">
+              <div style="font-size:22px">💾</div>
+              <div style="flex:1">
+                <div style="font-weight:700;color:var(--text)">Back up your data</div>
+                <div style="font-size:12px;color:var(--text2);margin-top:2px;line-height:1.4">${msg}</div>
+              </div>
+              <div style="color:var(--text3);font-size:18px">→</div>
+            </div>
+          </div>`;
+        })()}
+
+        <div class="card fade-in" style="cursor:pointer" onclick="El.finance.openHealthBreakdown()">
+          <div class="card-header">
+            <div class="card-title">Financial Health</div>
+            <span class="pill pill-${score==null?'red':(score>=60?'green':'red')}">${scoreGrade}</span>
+          </div>
           <div class="health-ring-wrap">
             <div class="health-ring">
               <canvas id="health-canvas" width="90" height="90"></canvas>
               <div class="health-ring-label">
-                <div class="health-score" style="color:${scoreColor}">${score}</div>
+                <div class="health-score" style="color:${scoreColor}">${score==null?'—':score}</div>
                 <div class="health-grade">/ 100</div>
               </div>
             </div>
@@ -1713,6 +1784,7 @@ const El = {
               </div>
             </div>
           </div>
+          <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:10px;letter-spacing:0.3px">tap to see breakdown</div>
         </div>
 
         <div class="grid-2 fade-in">
@@ -1783,11 +1855,8 @@ const El = {
         </div>
       `;
       El.ui.drawHealthRing(score, scoreColor);
-      // Reveal mic button now that Home HTML exists
-      if (window.SpeechRecognition || window.webkitSpeechRecognition) {
-        const micBtn = document.getElementById('capture-mic-btn');
-        if (micBtn) micBtn.style.display = 'flex';
-      }
+      // Mic button is always visible now — toggleCaptureSpeech() handles the
+      // unsupported case with a clear toast.
     },
 
     finance() {
@@ -1859,7 +1928,7 @@ const El = {
               <input id="txn-search" class="form-input" placeholder="🔍 Search transactions…" style="font-size:13px;padding:8px 12px" oninput="El.finance.filterTxns()" value="">
               <select id="txn-filter-cat" class="form-select" style="width:auto;font-size:13px;padding:8px 10px" onchange="El.finance.filterTxns()">
                 <option value="">All</option>
-                ${d.budget.categories.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
+                ${El.ui.catOptions()}
               </select>
             </div>
             <div id="txn-list-container">
@@ -2098,17 +2167,45 @@ const El = {
             <div id="gp-result" style="margin-top:14px"></div>
           </div>
           <!-- JOB LOSS RUNWAY -->
-          <div class="card" style="margin-top:4px">
-            <div class="card-header"><div class="card-title">🏚️ Job Loss Runway</div></div>
-            <div style="font-size:13px;color:var(--text2);margin-bottom:16px">If your income stopped today, how long could you sustain your lifestyle?</div>
-            <div class="form-row">
-              <div class="form-group"><label class="form-label">Monthly Expenses ($)</label>
-                <input class="form-input" id="jl-expenses" value="2500" type="number" oninput="El.ui.updateJobLoss()">
-              </div>
-              <div class="form-group"><label class="form-label">Liquid Savings ($)</label>
-                <input class="form-input" id="jl-savings" value="${Math.round(El.state.get().savings.reduce((s,x)=>s+x.current,0))}" type="number" oninput="El.ui.updateJobLoss()">
-              </div>
-            </div>
+          ${(()=>{
+            // Auto-derive monthly expenses: avg of last 3 months of expense
+            // transactions, falling back to recurring sum, category allocations,
+            // 70% of income, or a 2500 default.
+            const data = El.state.get();
+            const txns = (data.budget && data.budget.transactions) || [];
+            const monthSums = {};
+            txns.filter(t => t.type === 'expense' && t.date).forEach(t => {
+              const m = t.date.slice(0,7);
+              monthSums[m] = (monthSums[m]||0) + (t.amount||0);
+            });
+            const months = Object.keys(monthSums).sort().slice(-3);
+            let auto;
+            if (months.length >= 1) {
+              auto = Math.round(months.reduce((s,m)=>s+monthSums[m],0) / months.length);
+            } else {
+              const recurringSum = (data.recurring||[]).reduce((s,r)=>{
+                const f = r.frequency||'monthly';
+                const m = { weekly:52/12, biweekly:26/12, monthly:1, yearly:1/12 };
+                return s + (r.amount||0) * (m[f]||1);
+              }, 0);
+              const allocSum = ((data.budget && data.budget.categories)||[]).reduce((s,c)=>s+(c.allocated||0),0);
+              const inc = El.getIncome(data) || 0;
+              auto = Math.round(recurringSum || allocSum || (inc * 0.7) || 2500);
+            }
+            const liquidAuto = Math.round((data.savings||[]).reduce((s,x)=>s+x.current,0));
+            return `
+            <div class="card" style="margin-top:4px">
+              <div class="card-header"><div class="card-title">🏚️ Job Loss Runway</div></div>
+              <div style="font-size:13px;color:var(--text2);margin-bottom:16px">If your income stopped today, how long could you sustain your lifestyle? Pre-filled from your data — adjust to model a different scenario.</div>
+              <div class="form-row">
+                <div class="form-group"><label class="form-label">Monthly Expenses ($)<span style="font-size:11px;color:var(--text3);font-weight:400"> · auto from your data</span></label>
+                  <input class="form-input" id="jl-expenses" value="${auto}" type="number" oninput="El.ui.updateJobLoss()">
+                </div>
+                <div class="form-group"><label class="form-label">Liquid Savings ($)</label>
+                  <input class="form-input" id="jl-savings" value="${liquidAuto}" type="number" oninput="El.ui.updateJobLoss()">
+                </div>
+              </div>`;
+          })()}
             <div class="form-row">
               <div class="form-group"><label class="form-label">Severance (months pay)</label>
                 <input class="form-input" id="jl-severance" value="0" type="number" oninput="El.ui.updateJobLoss()">
@@ -2531,9 +2628,13 @@ const El = {
         <div class="settings-section fade-in">
           <div class="settings-title">Data</div>
           <button class="btn btn-outline" onclick="El.settings.exportData()" style="margin-bottom:10px">Export My Data (JSON)</button>
+          ${d.settings && d.settings.lastExportAt ? `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Last export: ${d.settings.lastExportAt}</div>` : ''}
           <button class="btn btn-danger" onclick="El.settings.resetApp()">Reset All Data</button>
         </div>
-        <div style="text-align:center;padding:24px 0;color:var(--text3);font-size:12px">El — Everyday Life · Made for ${d.profile.name}</div>
+        <div style="text-align:center;padding:24px 0;color:var(--text3);font-size:11px;line-height:1.6">
+          El — Everyday Life · Made for ${El.ai.escapeHtml(d.profile.name)}<br>
+          <span style="opacity:.7">build ${El.ai.escapeHtml(window.EL_BUILD || 'dev')}</span>
+        </div>
       `;
     }
   },
@@ -2546,10 +2647,15 @@ const El = {
 
   // ── UI HELPERS ─────────────────────────
   ui: {
+    // Reusable: render the budget-category dropdown options.
+    catOptions() {
+      const cats = (El.state.get().budget && El.state.get().budget.categories) || [];
+      const esc = s => El.ai.escapeHtml(String(s == null ? '' : s));
+      return cats.map(c => `<option value="${esc(c.id)}">${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+    },
     openModal(id) {
       document.getElementById(id).classList.add('open');
-      const cats = El.state.get().budget.categories;
-      const catOptions = cats.map(c=>`<option value="${c.id}">${c.icon} ${c.name}</option>`).join('');
+      const catOptions = this.catOptions();
       if (id==='modal-add-transaction') {
         document.getElementById('txn-date').value = El.today();
         document.getElementById('txn-category').innerHTML = catOptions;
@@ -2637,6 +2743,8 @@ const El = {
       ctx.clearRect(0,0,90,90);
       ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
       ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=lw; ctx.stroke();
+      // score===null means no data yet — leave the ring track empty.
+      if (score == null) return;
       const end = (-Math.PI/2)+(Math.PI*2*(score/100));
       ctx.beginPath(); ctx.arc(cx,cy,r,-Math.PI/2,end);
       ctx.strokeStyle=color; ctx.lineWidth=lw; ctx.lineCap='round'; ctx.stroke();
@@ -3055,24 +3163,152 @@ const El = {
 
   // ── FINANCE ────────────────────────────
   finance: {
+    // Returns just the numeric score (1-100) for backwards compat.
+    // Call El.finance.healthDetail() to get the breakdown.
     healthScore() {
-      const d = El.state.get();
-      let score = 50;
-      const income = El.getIncome(d) || 1;
-      const now = new Date();
-      const monthStr = El.monthKey(now);
-      const txns = d.budget.transactions.filter(t=>t.date&&t.date.startsWith(monthStr));
-      const spent = txns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
-      const totalDebt = d.debts.reduce((s,x)=>s+x.balance,0);
-      const totalSavings = d.savings.reduce((s,x)=>s+x.current,0);
-      const minPayments = d.debts.reduce((s,x)=>s+x.minPayment,0);
-      const dti = minPayments / income;
-      if (dti < 0.1) score += 20; else if (dti < 0.2) score += 10; else if (dti < 0.36) score += 0; else if (dti < 0.5) score -= 15; else score -= 30;
-      const sr = totalSavings / income;
-      if (sr > 6) score += 20; else if (sr > 3) score += 10; else if (sr > 1) score += 5; else if (sr > 0) score += 0; else score -= 10;
-      const br = spent / income;
-      if (br < 0.7) score += 10; else if (br < 0.9) score += 5; else if (br < 1) score += 0; else score -= 20;
-      return Math.max(1, Math.min(100, score));
+      return this.healthDetail().score;
+    },
+    // Weighted financial-health breakdown.
+    healthDetail() {
+      const d = El.state.get() || {};
+      const income = El.getIncome(d);
+      const totalDebt = (d.debts||[]).reduce((s,x)=>s+(x.balance||0),0);
+      const totalSavings = (d.savings||[]).reduce((s,x)=>s+(x.current||0),0);
+      const minPayments = (d.debts||[]).reduce((s,x)=>s+(x.minPayment||0),0);
+      const monthStr = El.monthKey(new Date());
+      const monthTxns = ((d.budget && d.budget.transactions) || [])
+        .filter(t => t.date && t.date.startsWith(monthStr));
+      const spent = monthTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+      const totalAllocated = ((d.budget && d.budget.categories) || [])
+        .reduce((s,c)=>s+(c.allocated||0),0);
+
+      if (!income && !spent && !totalSavings && !totalDebt) {
+        return { score: null, grade: '—', breakdown: [],
+          summary: 'Add income, savings, or debts to see your financial health score.' };
+      }
+
+      const breakdown = [];
+
+      // 1. Emergency fund (25%)
+      const monthlyExpenses = spent || (income * 0.7) || 1;
+      const efMonths = totalSavings / monthlyExpenses;
+      let efScore;
+      if (efMonths >= 6) efScore = 100;
+      else if (efMonths >= 3) efScore = 80;
+      else if (efMonths >= 1) efScore = 55;
+      else if (efMonths > 0) efScore = 30;
+      else efScore = 0;
+      breakdown.push({ key:'emergency', label:'Emergency Fund', weight:25, score:efScore,
+        value: efMonths > 0 ? efMonths.toFixed(1) + ' mo' : 'None',
+        hint: efMonths >= 3 ? 'Solid cushion' : efMonths >= 1 ? 'Build to 3-6 months' : 'Start with $1,000 buffer' });
+
+      // 2. Debt-to-Income (25%)
+      let dtiScore, dtiValue, dtiHint;
+      if (income > 0) {
+        const dti = minPayments / income;
+        if (dti < 0.1) { dtiScore = 100; dtiHint = 'Very low'; }
+        else if (dti < 0.2) { dtiScore = 80; dtiHint = 'Healthy'; }
+        else if (dti < 0.36) { dtiScore = 55; dtiHint = 'Manageable'; }
+        else if (dti < 0.5) { dtiScore = 25; dtiHint = 'High — be careful'; }
+        else { dtiScore = 0; dtiHint = 'Critical — restructure'; }
+        dtiValue = Math.round(dti * 100) + '%';
+      } else {
+        dtiScore = 50; dtiValue = 'No income set'; dtiHint = 'Add income in Settings';
+      }
+      breakdown.push({ key:'dti', label:'Debt-to-Income', weight:25, score:dtiScore, value:dtiValue, hint:dtiHint });
+
+      // 3. Net-worth health (20%)
+      const netWorth = totalSavings - totalDebt;
+      let nwScore, nwHint;
+      if (totalDebt === 0 && totalSavings > 0) { nwScore = 100; nwHint = 'Debt-free'; }
+      else if (totalDebt === 0) { nwScore = 70; nwHint = 'No debt — start saving'; }
+      else if (totalSavings >= totalDebt * 2) { nwScore = 95; nwHint = 'Savings 2x debt'; }
+      else if (totalSavings >= totalDebt) { nwScore = 80; nwHint = 'Savings cover debt'; }
+      else if (totalSavings >= totalDebt * 0.5) { nwScore = 55; nwHint = 'Halfway covered'; }
+      else if (totalSavings > 0) { nwScore = 30; nwHint = 'Debt outweighs savings'; }
+      else if (totalDebt > 0) { nwScore = 10; nwHint = 'Debt with no savings buffer'; }
+      else { nwScore = 50; nwHint = 'Building'; }
+      breakdown.push({ key:'networth', label:'Net Worth', weight:20, score:nwScore, value:El.fmt(netWorth), hint:nwHint });
+
+      // 4. Budget adherence (15%)
+      let budgetScore, budgetValue, budgetHint;
+      if (totalAllocated === 0) {
+        budgetScore = 50; budgetValue = 'No budget set'; budgetHint = 'Set category limits in Finance';
+      } else {
+        const ratio = spent / totalAllocated;
+        if (ratio <= 0.85) { budgetScore = 100; budgetHint = 'Well under budget'; }
+        else if (ratio <= 1.0) { budgetScore = 80; budgetHint = 'On track'; }
+        else if (ratio <= 1.15) { budgetScore = 50; budgetHint = 'Slightly over'; }
+        else if (ratio <= 1.5) { budgetScore = 25; budgetHint = 'Significantly over'; }
+        else { budgetScore = 0; budgetHint = 'Way over budget'; }
+        budgetValue = Math.round(ratio * 100) + '% used';
+      }
+      breakdown.push({ key:'budget', label:'Budget Adherence', weight:15, score:budgetScore, value:budgetValue, hint:budgetHint });
+
+      // 5. 30-day net-worth trend (15%)
+      const hist = (d.netWorthHistory||[]).slice(-30);
+      let trendScore, trendValue, trendHint;
+      if (hist.length < 2) {
+        trendScore = 50; trendValue = 'Building history'; trendHint = 'Need a few days of data';
+      } else {
+        const first = hist[0].value, last = hist[hist.length-1].value;
+        const change = last - first;
+        const base = Math.max(Math.abs(first), 1);
+        const pct = (change / base) * 100;
+        if (pct >= 5) { trendScore = 100; trendHint = 'Strong upward trend'; }
+        else if (pct >= 0) { trendScore = 80; trendHint = 'Trending up'; }
+        else if (pct >= -5) { trendScore = 50; trendHint = 'Roughly flat'; }
+        else if (pct >= -15) { trendScore = 25; trendHint = 'Trending down'; }
+        else { trendScore = 0; trendHint = 'Sharp drop'; }
+        trendValue = (change >= 0 ? '+' : '') + El.fmt(change);
+      }
+      breakdown.push({ key:'trend', label:'30-Day Trend', weight:15, score:trendScore, value:trendValue, hint:trendHint });
+
+      const weighted = breakdown.reduce((s,b) => s + (b.score * b.weight / 100), 0);
+      const score = Math.round(Math.max(1, Math.min(100, weighted)));
+      const grade = score>=90?'A+':score>=80?'A':score>=70?'B':score>=60?'C':score>=50?'D':'F';
+      const weakest = breakdown.slice().sort((a,b)=>a.score-b.score)[0];
+      const summary = score >= 80
+        ? 'Strong financial position. Keep it up.'
+        : score >= 60
+        ? 'Healthy overall — biggest opportunity: ' + weakest.label.toLowerCase() + '.'
+        : score >= 40
+        ? 'Mixed signals. Focus on ' + weakest.label.toLowerCase() + ' first.'
+        : 'Tight spot. Top priority: ' + weakest.label.toLowerCase() + '.';
+      return { score, grade, breakdown, summary };
+    },
+    // Renders the breakdown modal.
+    openHealthBreakdown() {
+      const detail = this.healthDetail();
+      const overlay = document.getElementById('modal-health-breakdown');
+      if (!overlay) return;
+      const body = document.getElementById('health-breakdown-body');
+      const esc = s => El.ai.escapeHtml(String(s));
+      const scoreColor = detail.score==null ? 'var(--text3)'
+        : detail.score>=80?'var(--teal)':detail.score>=60?'#a8ff78':detail.score>=40?'var(--yellow)':detail.score>=20?'var(--orange)':'var(--red)';
+      const headline = detail.score == null
+        ? '<div style="font-size:48px;font-weight:800;color:var(--text3);text-align:center;margin:8px 0">—</div>'
+          + '<div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:18px">' + esc(detail.summary) + '</div>'
+        : '<div style="display:flex;align-items:baseline;justify-content:center;gap:6px;margin:8px 0">'
+          + '<div style="font-size:52px;font-weight:800;color:' + scoreColor + ';line-height:1">' + detail.score + '</div>'
+          + '<div style="font-size:18px;color:var(--text3);font-weight:600">/ 100 · ' + detail.grade + '</div>'
+          + '</div>'
+          + '<div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:18px">' + esc(detail.summary) + '</div>';
+      const rows = detail.breakdown.map(b => {
+        const barColor = b.score>=80?'var(--teal)':b.score>=60?'#a8ff78':b.score>=40?'var(--yellow)':b.score>=20?'var(--orange)':'var(--red)';
+        return '<div style="margin-bottom:14px">'
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">'
+          +   '<div><b>' + esc(b.label) + '</b> <span style="font-size:11px;color:var(--text3)">· ' + b.weight + '%</span></div>'
+          +   '<div style="font-size:13px;color:var(--text2)">' + esc(b.value) + '</div>'
+          + '</div>'
+          + '<div style="background:rgba(255,255,255,0.06);height:6px;border-radius:3px;overflow:hidden">'
+          +   '<div style="width:' + b.score + '%;height:100%;background:' + barColor + ';transition:width 0.4s ease"></div>'
+          + '</div>'
+          + '<div style="font-size:11px;color:var(--text3);margin-top:4px">' + esc(b.hint) + '</div>'
+          + '</div>';
+      }).join('');
+      body.innerHTML = headline + (rows || '<div style="color:var(--text2);font-size:13px;text-align:center;padding:8px 0">No data yet — add income, savings, or debts to see component scores.</div>');
+      El.ui.openModal('modal-health-breakdown');
     },
     calcPayoff(debts, extra, method) {
       if (!debts.length) return { months:0, balances:[0], totalInterest:0, unpayable:false, warnings:[] };
@@ -3738,12 +3974,13 @@ const El = {
       const p = El.ai._pending;
       if (!p) return;
       const d = El.state.get();
+      const esc = s => El.ai.escapeHtml(String(s == null ? '' : s));
       if (p.type === 'debt') {
         if (!d.debts) d.debts = [];
         d.debts.push(p.data);
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Added <b>' + p.data.name + '</b> to your debts! Head to Finance → Debts to see it and track payoff strategies.');
+        El.ai.addMsg('ai', '✅ Added <b>' + esc(p.data.name) + '</b> to your debts! Head to Finance → Debts to see it and track payoff strategies.');
       } else if (p.type === 'events') {
         if (!d.events) d.events = [];
         p.data.forEach(e => d.events.push(e));
@@ -3756,41 +3993,40 @@ const El = {
         d.profile.incomes.push(p.data);
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Added <b>' + p.data.name + '</b> (' + El.fmt(p.data.amount) + ' ' + p.data.frequency + ') to your income sources! Check Settings to manage all sources.');
+        El.ai.addMsg('ai', '✅ Added <b>' + esc(p.data.name) + '</b> (' + El.fmt(p.data.amount) + ' ' + esc(p.data.frequency) + ') to your income sources! Check Settings to manage all sources.');
       } else if (p.type === 'income_events') {
-        // Add income source AND upcoming paydays to calendar
         if (!d.profile.incomes) d.profile.incomes = [];
         d.profile.incomes.push(p.data.income);
         if (!d.events) d.events = [];
         p.data.events.forEach(e => d.events.push(e));
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Added <b>' + p.data.income.name + '</b> to your income and <b>' + p.data.events.length + ' paydays</b> to your calendar! Check the Schedule tab to see them.');
+        El.ai.addMsg('ai', '✅ Added <b>' + esc(p.data.income.name) + '</b> to your income and <b>' + p.data.events.length + ' paydays</b> to your calendar! Check the Schedule tab to see them.');
       } else if (p.type === 'transaction') {
         if (!d.budget.transactions) d.budget.transactions = [];
         d.budget.transactions.push(p.data);
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Added <b>' + p.data.description + '</b> as a ' + p.data.type + ' for ' + El.fmt(p.data.amount) + '.');
+        El.ai.addMsg('ai', '✅ Added <b>' + esc(p.data.description) + '</b> as a ' + esc(p.data.type) + ' for ' + El.fmt(p.data.amount) + '.');
       } else if (p.type === 'savings') {
         if (!d.savings) d.savings = [];
         d.savings.push(p.data);
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Added <b>' + p.data.name + '</b> to your savings goals.');
+        El.ai.addMsg('ai', '✅ Added <b>' + esc(p.data.name) + '</b> to your savings goals.');
       } else if (p.type === 'category') {
         if (!d.budget.categories) d.budget.categories = [];
         d.budget.categories.push(p.data);
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Added <b>' + p.data.name + '</b> as a budget category.');
+        El.ai.addMsg('ai', '✅ Added <b>' + esc(p.data.name) + '</b> as a budget category.');
       } else if (p.type === 'log_food') {
         if (!d.macros) d.macros = { goals: { calories:2000, protein:150, carbs:200, fat:65 }, log: [] };
         if (!d.macros.log) d.macros.log = [];
         d.macros.log.push(p.data);
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Logged <b>' + p.data.name + '</b> — <b>' + p.data.calories + ' cal</b>, ' + p.data.protein + 'g protein. Check the Fitness tab to see today\'s totals!');
+        El.ai.addMsg('ai', '✅ Logged <b>' + esc(p.data.name) + '</b> — <b>' + p.data.calories + ' cal</b>, ' + p.data.protein + 'g protein. Check the Fitness tab to see today\'s totals!');
         if (El.nav.current === 'fitness') El.render.fitness();
       } else if (p.type === 'log_workout') {
         if (!d.workouts) d.workouts = { templates: [], log: [] };
@@ -3798,7 +4034,7 @@ const El = {
         d.workouts.log.push({ id: p.data.id, name: p.data.name, date: p.data.date, sets: p.data.sets, exercises: p.data.exercises });
         El.state.save();
         El.ai._pending = null;
-        El.ai.addMsg('ai', '✅ Logged <b>' + p.data.name + '</b> (' + p.data.exercises + ' exercise' + (p.data.exercises!==1?'s':'') + ', ' + p.data.sets + ' sets). Great work! 💪');
+        El.ai.addMsg('ai', '✅ Logged <b>' + esc(p.data.name) + '</b> (' + p.data.exercises + ' exercise' + (p.data.exercises!==1?'s':'') + ', ' + p.data.sets + ' sets). Great work! 💪');
         if (El.nav.current === 'fitness') El.render.fitness();
       }
     },
@@ -3962,7 +4198,7 @@ const El = {
       const input = document.getElementById('quick-capture-input');
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        if (btn) btn.style.display = 'none';
+        El.ui.showToast('🎤 Voice input isn\'t available here. Open El in Safari (not Home Screen) for voice, or use iPhone Dictation on the keyboard.');
         return;
       }
       // If already recording, stop
@@ -4020,6 +4256,15 @@ const El = {
       catch(e) { El.ui.showToast('🎤 Could not start microphone: ' + e.message); }
     },
     _initialized: false,
+    // True only when the user has selected Claude/OpenAI AND saved an API key.
+    // The built-in keyword matcher is intentionally not enough — capture and
+    // chat both need a real model to be useful.
+    isConfigured() {
+      const d = El.state.get();
+      const provider = d?.settings?.aiProvider;
+      const apiKey = (d?.settings?.aiApiKey || '').trim();
+      return (provider === 'claude' || provider === 'openai') && !!apiKey;
+    },
     init() {
       const suggestions = [
         'How am I doing financially?','When should I pay off debt first?',
@@ -4036,8 +4281,14 @@ const El = {
         if (saved.length > 0) {
           this.history = saved.slice();
           saved.forEach(m => this.addMsg(m.role, m.content));
+        } else if (!this.isConfigured()) {
+          this.addMsg('ai',
+            `Hey ${this.escapeHtml(d.profile.name)}! El AI needs an API key to chat. ` +
+            `Tap <b>Settings → El AI Provider</b>, choose Claude or ChatGPT, paste your key, and Save. ` +
+            `Once it's in, I can answer finance questions, log expenses, and add things to your calendar from a single sentence.`
+          );
         } else {
-          this.addMsg('ai', `Hey ${d.profile.name}! I'm El — your everyday life assistant. Ask me anything, or try telling me about a debt like "I owe $4,500 on my Chase card at 22% APR" or your schedule like "I work out Mon/Wed/Fri at 6am" and I'll offer to add it automatically!`);
+          this.addMsg('ai', `Hey ${this.escapeHtml(d.profile.name)}! I'm El — your everyday life assistant. Ask me anything, or try telling me about a debt like "I owe $4,500 on my Chase card at 22% APR" or your schedule like "I work out Mon/Wed/Fri at 6am" and I'll offer to add it automatically!`);
         }
       }
     },
@@ -4530,7 +4781,7 @@ Use **bold** for key numbers.`;
             if (action.type !== 'parse_error') {
               this.handleElAction(action);
             } else {
-              console.warn('[El] Failed to parse EL_ACTION:', action.raw, action.error);
+              if (El.debug) console.warn('[El] Failed to parse EL_ACTION:', action.raw, action.error);
             }
           });
         } catch(e) {
@@ -4648,12 +4899,16 @@ Use **bold** for key numbers.`;
       const monthStr = El.monthKey(now);
       const txns = d.budget.transactions.filter(t=>t.date&&t.date.startsWith(monthStr));
       const spent = txns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
-      const score = El.finance.healthScore();
+      const detail = El.finance.healthDetail();
+      const score = detail.score;
 
       // Intent detection
       if (q.match(/how.*doing|health|score|overall|status/)) {
-        const grade = score>=90?'A+':score>=80?'A':score>=70?'B':score>=60?'C':score>=50?'D':'F';
-        return `Your financial health score is **${score}/100** (Grade ${grade}).\n\n${totalDebt>0?`You have ${El.fmt(totalDebt)} in total debt across ${d.debts.length} account${d.debts.length!==1?'s':''}. `:'Great news — no tracked debts! '}${totalSavings>0?`You have ${El.fmt(totalSavings)} saved. `:'You haven\'t added savings goals yet. '}${income>0?`Your income is ${El.fmt(income)}/month`:''}.\n\n${score<50?'I\'d suggest focusing on reducing debt first — it\'s costing you interest every day.':score<70?'You\'re on the right track! Paying down high-APR debt faster would boost your score significantly.':'You\'re doing well! Consider increasing your investment contributions to build long-term wealth.'}`;
+        if (score == null) {
+          return `I don't have enough info to score you yet. Add some income, savings, or debts in the Finance tab and I'll give you a real picture.`;
+        }
+        const weakest = detail.breakdown.slice().sort((a,b)=>a.score-b.score)[0];
+        return `Your financial health score is **${score}/100** (Grade ${detail.grade}).\n\n${totalDebt>0?`You have ${El.fmt(totalDebt)} in total debt across ${d.debts.length} account${d.debts.length!==1?'s':''}. `:'Great news — no tracked debts! '}${totalSavings>0?`You have ${El.fmt(totalSavings)} saved. `:'You haven\'t added savings goals yet. '}${income>0?`Your income is ${El.fmt(income)}/month`:''}.\n\nWeakest area: **${weakest.label}** (${weakest.value}). ${weakest.hint}.\n\n${score<50?'I\'d focus on the weakest component first — that\'s the fastest score gain.':score<70?'You\'re on the right track. Address the lowest-scoring component to lift the overall grade.':'You\'re doing well! Keep the top components steady and improve the bottom one over time.'}`;
       }
 
       if (q.match(/debt|pay.*off|owe|loan|credit/)) {
@@ -5141,6 +5396,9 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       if (tb) tb.style.display = (provider !== 'builtin' && apiKey) ? 'inline-flex' : 'none';
       const tr = document.getElementById('ai-test-result');
       if (tr) tr.style.display = 'none';
+      // Refresh nav so the AI tab appears/disappears with the new provider+key.
+      if (El.nav && El.nav.refreshAiVisibility) El.nav.refreshAiVisibility();
+      if (El.nav.current === 'home' && El.render && El.render.home) El.render.home();
       alert(provider === 'builtin' ? 'Saved! Using built-in El AI.' : 'Saved! Tap "Test Connection" to verify your key works.');
     },
     async testAiProvider() {
@@ -5275,12 +5533,18 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       this.saveGcalClientId();
     },
     exportData() {
-      const data = JSON.stringify(El.state.get(), null, 2);
+      const d = El.state.get();
+      const data = JSON.stringify(d, null, 2);
       const blob = new Blob([data], { type:'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'el-data.json';
+      a.download = 'el-data-' + El.today() + '.json';
       a.click();
+      // Stamp the export so the Home backup reminder fades for 30 days.
+      if (!d.settings) d.settings = {};
+      d.settings.lastExportAt = El.today();
+      El.state.save();
+      if (El.nav.current === 'home' && El.render && El.render.home) El.render.home();
     },
     resetApp() {
       if (!confirm('This will erase ALL your data. Are you sure?')) return;

@@ -1,4 +1,8 @@
-const EL_CACHE = 'el-pages-v2';
+// Bump BUILD on every release to invalidate the SW cache automatically.
+// Keep this string in sync with EL_BUILD in index.html and the
+// "<!-- El fix build: ... -->" comment in index.html.
+const BUILD = '2026-04-29-bug-fixes-v3';
+const EL_CACHE = 'el-pages-' + BUILD;
 const APP_SHELL = [
   './',
   './index.html',

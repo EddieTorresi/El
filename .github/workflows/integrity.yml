@@ -1,0 +1,20 @@
+name: Integrity Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-index-html:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x scripts/check-integrity.sh
+
+      - name: Verify index.html is not truncated
+        run: ./scripts/check-integrity.sh index.html
