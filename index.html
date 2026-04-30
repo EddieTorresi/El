@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29-bug-fixes-v9 whatif-trio scenario-compare life-goals debt-vs-invest-narrative -->
+<!-- El fix build: 2026-04-29-bug-fixes-v10 hotfix-nowd-safe-mode -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-04-29-bug-fixes-v9';</script>
+<script>window.EL_BUILD = '2026-04-29-bug-fixes-v10';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -1907,6 +1907,7 @@ const El = {
 
         ${(()=>{
           // What changed (Mon only by default; show today only on Mondays).
+          const nowD = new Date();
           if (nowD.getDay() !== 1) return '';
           const ms7 = 7 * 86400000;
           const startThisWeek = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - 7);
