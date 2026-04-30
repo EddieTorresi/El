@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29-bug-fixes-v3 health-score-rewrite ai-tab-gating xss-escape backup-reminder build-tag -->
+<!-- El fix build: 2026-04-29-bug-fixes-v4 token-optimization auto-model-routing latest-models set-budget-action ok-to-buy -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-04-29-bug-fixes-v3';</script>
+<script>window.EL_BUILD = '2026-04-29-bug-fixes-v4';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -2234,8 +2234,42 @@ const El = {
             </div>
             <div id="ue-result" style="margin-top:14px"></div>
           </div>
+
+          <!-- OK TO BUY -->
+          <div class="card" style="margin-top:4px">
+            <div class="card-header"><div class="card-title">🛒 OK to Buy?</div></div>
+            <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Tell El what you're thinking of buying. Verdict is instant from your data — tap "Ask El" for a deeper take.</div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Item</label>
+                <input class="form-input" id="ob-item" placeholder="e.g. Toyota Camry" oninput="El.ui.updateOkToBuy()">
+              </div>
+              <div class="form-group"><label class="form-label">Price ($)</label>
+                <input class="form-input" id="ob-price" placeholder="e.g. 30000" type="number" oninput="El.ui.updateOkToBuy()">
+              </div>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:12px;padding:6px 0">
+              <input type="checkbox" id="ob-finance" style="width:18px;height:18px;accent-color:var(--primary);cursor:pointer" onchange="El.ui.toggleOkToBuyFinance()">
+              <label for="ob-finance" style="font-size:14px;color:var(--text);cursor:pointer">Financed (loan)</label>
+            </div>
+            <div id="ob-finance-fields" style="display:none">
+              <div class="form-row">
+                <div class="form-group"><label class="form-label">Down Payment ($)</label>
+                  <input class="form-input" id="ob-down" value="0" type="number" oninput="El.ui.updateOkToBuy()">
+                </div>
+                <div class="form-group"><label class="form-label">Term (months)</label>
+                  <input class="form-input" id="ob-months" value="60" type="number" oninput="El.ui.updateOkToBuy()">
+                </div>
+              </div>
+              <div class="form-group"><label class="form-label">APR (%)</label>
+                <input class="form-input" id="ob-apr" value="6.9" type="number" oninput="El.ui.updateOkToBuy()">
+              </div>
+            </div>
+            <div id="ob-result" style="margin-top:14px"></div>
+            <button class="btn btn-outline" id="ob-ai-btn" style="margin-top:12px;display:none" onclick="El.ai.analyzePurchaseFromForm()">Ask El for deeper analysis</button>
+            <div id="ob-ai-result" style="margin-top:14px"></div>
+          </div>
         `;
-        setTimeout(()=>{ El.ui.updateNewDebt(); El.ui.updateInvestVsDebt(); El.ui.updateGoalPlanner(); El.ui.updateBuyVsLoan(); El.ui.updateJobLoss(); El.ui.updateEmergencyImpact(); }, 50);
+        setTimeout(()=>{ El.ui.updateNewDebt(); El.ui.updateInvestVsDebt(); El.ui.updateGoalPlanner(); El.ui.updateBuyVsLoan(); El.ui.updateJobLoss(); El.ui.updateEmergencyImpact(); El.ui.updateOkToBuy(); }, 50);
       }
     },
 
@@ -2519,8 +2553,30 @@ const El = {
             <div class="form-group" id="ai-claude-model-group" style="display:${d.settings?.aiProvider==='claude'?'block':'none'}">
               <label class="form-label">Claude Model</label>
               <select class="form-select" id="ai-claude-model">
-                ${[['claude-sonnet-4-6','Claude Sonnet 4.6 — current recommended'],['claude-sonnet-4-5','Claude Sonnet 4.5'],['claude-3-5-sonnet-20241022','Claude 3.5 Sonnet — older fallback'],['claude-3-5-haiku-20241022','Claude 3.5 Haiku — cheaper fallback']].map(([v,l])=>`<option value="${v}" ${(d.settings?.aiClaudeModel||'claude-sonnet-4-6')===v?'selected':''}>${l}</option>`).join('')}
+                ${[
+                  ['auto','Auto — pick best per question (recommended)'],
+                  ['claude-opus-4-6','Claude Opus 4.6 — deepest reasoning'],
+                  ['claude-sonnet-4-6','Claude Sonnet 4.6 — balanced'],
+                  ['claude-haiku-4-5-20251001','Claude Haiku 4.5 — cheapest, fastest'],
+                  ['claude-sonnet-4-5','Claude Sonnet 4.5'],
+                  ['claude-3-5-sonnet-20241022','Claude 3.5 Sonnet — older fallback'],
+                  ['claude-3-5-haiku-20241022','Claude 3.5 Haiku — older cheap fallback']
+                ].map(([v,l])=>`<option value="${v}" ${(d.settings?.aiClaudeModel||'auto')===v?'selected':''}>${l}</option>`).join('')}
               </select>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px">Auto picks Haiku for short captures, Opus for deep analysis, Sonnet for everything else — saves tokens.</div>
+            </div>
+            <div class="form-group" id="ai-openai-model-group" style="display:${d.settings?.aiProvider==='openai'?'block':'none'}">
+              <label class="form-label">OpenAI Model</label>
+              <select class="form-select" id="ai-openai-model">
+                ${[
+                  ['auto','Auto — pick best per question (recommended)'],
+                  ['gpt-4.1','GPT-4.1 — deepest reasoning'],
+                  ['gpt-4o','GPT-4o — balanced'],
+                  ['gpt-4.1-mini','GPT-4.1 mini — cheaper'],
+                  ['gpt-4o-mini','GPT-4o mini — cheapest, fastest']
+                ].map(([v,l])=>`<option value="${v}" ${(d.settings?.aiOpenAiModel||'auto')===v?'selected':''}>${l}</option>`).join('')}
+              </select>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px">Auto routes short captures to mini, deep analysis to GPT-4.1.</div>
             </div>
             <div class="form-group" id="ai-key-group" style="display:${d.settings?.aiProvider&&d.settings?.aiProvider!=='builtin'?'block':'none'}">
               <label class="form-label">API Key</label>
@@ -2734,6 +2790,49 @@ const El = {
       document.querySelectorAll('#edit-txn-type-tabs .tab').forEach((t,i)=>t.classList.toggle('active',['expense','income'][i]===type));
       const span = document.querySelector('#edit-txn-recurring-wrap span');
       if (span) span.textContent = type==='income' ? 'Make this recurring income' : 'Make this a recurring expense';
+    },
+    toggleOkToBuyFinance() {
+      const on = document.getElementById('ob-finance').checked;
+      const fields = document.getElementById('ob-finance-fields');
+      if (fields) fields.style.display = on ? 'block' : 'none';
+      this.updateOkToBuy();
+    },
+    updateOkToBuy() {
+      const item    = document.getElementById('ob-item')?.value.trim() || '';
+      const price   = parseFloat(document.getElementById('ob-price')?.value) || 0;
+      const fin     = document.getElementById('ob-finance')?.checked;
+      const down    = fin ? (parseFloat(document.getElementById('ob-down')?.value) || 0) : 0;
+      const months  = fin ? (parseFloat(document.getElementById('ob-months')?.value) || 0) : 0;
+      const apr     = fin ? (parseFloat(document.getElementById('ob-apr')?.value) || 0) : 0;
+      const out     = document.getElementById('ob-result');
+      const aiBtn   = document.getElementById('ob-ai-btn');
+      const aiOut   = document.getElementById('ob-ai-result');
+      if (aiOut) aiOut.innerHTML = '';
+      if (!out) return;
+      if (!price) {
+        out.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:8px 0">Enter a price to see the verdict.</div>';
+        if (aiBtn) aiBtn.style.display = 'none';
+        return;
+      }
+      const r = El.finance.evaluateBuy({ price, downPayment: down, months, apr });
+      const flagColor = c => ({red:'var(--red)',orange:'var(--orange)',yellow:'var(--yellow)',green:'var(--teal)',gray:'var(--text3)'})[c] || 'var(--text2)';
+      const fmtBold = t => El.ai.escapeHtml(t).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+      const flagsHtml = r.flags.map(f =>
+        '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px">' +
+          '<div style="width:6px;height:6px;border-radius:50%;background:'+flagColor(f.c)+';margin-top:7px;flex-shrink:0"></div>' +
+          '<div style="font-size:13px;color:var(--text2);line-height:1.5">'+fmtBold(f.t)+'</div>' +
+        '</div>').join('');
+      out.innerHTML = `
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px">
+          <div style="font-size:22px;font-weight:800;color:${r.verdictColor}">${r.verdict}</div>
+          <div style="font-size:12px;color:var(--text3)">score ${r.score}/100</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.6">
+          ${r.isCash ? 'Cash purchase: <b>'+El.fmt(r.totalCost)+'</b>' : 'Monthly payment: <b>'+El.fmt(r.monthlyPayment)+'</b> · Total over '+months+' mo: <b>'+El.fmt(r.totalCost)+'</b>'}
+        </div>
+        ${flagsHtml || '<div style="color:var(--text3);font-size:13px">No flags — looks clean.</div>'}
+      `;
+      if (aiBtn) aiBtn.style.display = (El.ai && El.ai.isConfigured && El.ai.isConfigured()) ? 'inline-flex' : 'none';
     },
     drawHealthRing(score, color) {
       const canvas = document.getElementById('health-canvas');
@@ -3472,6 +3571,88 @@ const El = {
       // Refresh calendar if currently visible so the new recurring expense shows
       if (El.nav.current === 'schedule') El.schedule.renderCalendar();
     },
+    // Local OK-to-Buy verdict — pure heuristic, no API call.
+    // Returns { score, verdict, verdictColor, flags[], monthlyPayment, totalCost, ...numbers }.
+    evaluateBuy(opts) {
+      const price        = Math.max(0, Number(opts.price) || 0);
+      const downPayment  = Math.max(0, Number(opts.downPayment) || 0);
+      const months       = Math.max(0, Number(opts.months) || 0);
+      const apr          = Math.max(0, Number(opts.apr) || 0);
+      const isCash       = !months;
+      const d            = El.state.get();
+      const income       = El.getIncome(d) || 0;
+      const totalDebt    = (d.debts||[]).reduce((s,x)=>s+(x.balance||0),0);
+      const totalSavings = (d.savings||[]).reduce((s,x)=>s+(x.current||0),0);
+      const minPayments  = (d.debts||[]).reduce((s,x)=>s+(x.minPayment||0),0);
+
+      // Monthly expenses estimate (same logic as health score's emergency component).
+      const monthStr = El.monthKey(new Date());
+      const mTxns = ((d.budget && d.budget.transactions)||[]).filter(t=>t.date && t.date.startsWith(monthStr));
+      const spent = mTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+      const monthExpenses = spent || (income * 0.7) || 1;
+
+      let monthlyPayment = 0;
+      if (!isCash) {
+        const principal = Math.max(0, price - downPayment);
+        const r = apr / 100 / 12;
+        monthlyPayment = r === 0 ? principal / months : (principal * r) / (1 - Math.pow(1+r, -months));
+      }
+      const totalCost   = isCash ? price : (monthlyPayment * months + downPayment);
+      const interestPaid = isCash ? 0 : Math.max(0, totalCost - price);
+      const cashOut     = isCash ? price : downPayment;
+      const savingsRem  = totalSavings - cashOut;
+      const cashUsedPct = totalSavings > 0 ? (cashOut / totalSavings) * 100 : (cashOut > 0 ? 100 : 0);
+      const oldDti      = income > 0 ? minPayments / income : 0;
+      const newDti      = income > 0 ? (minPayments + monthlyPayment) / income : 0;
+      const oldRunway   = monthExpenses > 0 ? totalSavings / monthExpenses : 0;
+      const newRunway   = monthExpenses > 0 ? Math.max(0, savingsRem) / monthExpenses : 0;
+      const paymentPct  = income > 0 ? (monthlyPayment / income) * 100 : 0;
+
+      let score = 100;
+      const flags = [];
+
+      if (price <= 0) {
+        return { score: null, verdict: 'Enter price', verdictColor: 'var(--text3)', flags: [],
+                 monthlyPayment: 0, totalCost: 0, interestPaid: 0,
+                 paymentPct: 0, cashUsedPct: 0, oldDti, newDti, oldRunway, newRunway, isCash };
+      }
+
+      // Payment as % of income
+      if (paymentPct > 30)      { score -= 40; flags.push({c:'red',    t:'Payment is **'+Math.round(paymentPct)+'%** of monthly income — over 30% is dangerous'}); }
+      else if (paymentPct > 20) { score -= 25; flags.push({c:'orange', t:'Payment is **'+Math.round(paymentPct)+'%** of monthly income — over 20% is tight'}); }
+      else if (paymentPct > 10) { score -= 10; flags.push({c:'yellow', t:'Payment is **'+Math.round(paymentPct)+'%** of monthly income'}); }
+      else if (paymentPct > 0)  {                flags.push({c:'green',  t:'Payment is only **'+paymentPct.toFixed(1)+'%** of income'}); }
+
+      // Cash drain
+      if (savingsRem < 0)            { score -= 50; flags.push({c:'red',    t:'Cash needed (**'+El.fmt(cashOut)+'**) exceeds your savings by **'+El.fmt(-savingsRem)+'**'}); }
+      else if (cashUsedPct > 75)     { score -= 30; flags.push({c:'red',    t:'Uses **'+Math.round(cashUsedPct)+'%** of your liquid savings'}); }
+      else if (cashUsedPct > 50)     { score -= 15; flags.push({c:'orange', t:'Uses **'+Math.round(cashUsedPct)+'%** of liquid savings'}); }
+      else if (cashUsedPct > 25)     { score -= 5;  flags.push({c:'yellow', t:'Uses **'+Math.round(cashUsedPct)+'%** of liquid savings'}); }
+
+      // DTI
+      if (oldDti < 0.36 && newDti >= 0.36) { score -= 20; flags.push({c:'red',    t:'Pushes DTI from '+Math.round(oldDti*100)+'% to **'+Math.round(newDti*100)+'%** (above the 36% safe limit)'}); }
+      else if (newDti > 0.5)               { score -= 30; flags.push({c:'red',    t:'New DTI **'+Math.round(newDti*100)+'%** is critical'}); }
+
+      // Emergency runway
+      if (oldRunway >= 3 && newRunway < 3) { score -= 15; flags.push({c:'orange', t:'Drops emergency runway from **'+oldRunway.toFixed(1)+'** to **'+newRunway.toFixed(1)+'** months'}); }
+      if (newRunway < 1 && newRunway < oldRunway) { score -= 25; flags.push({c:'red', t:'Leaves less than **1 month** of emergency runway'}); }
+
+      // Interest paid as flag (informational)
+      if (!isCash && interestPaid > 0) {
+        flags.push({c:'gray', t:'Interest cost over the loan: **'+El.fmt(interestPaid)+'** (total spent: '+El.fmt(totalCost)+')'});
+      }
+
+      score = Math.max(0, Math.min(100, score));
+      let verdict, verdictColor;
+      if (score >= 75)      { verdict = 'Within means'; verdictColor = 'var(--teal)'; }
+      else if (score >= 55) { verdict = 'Manageable';   verdictColor = '#a8ff78'; }
+      else if (score >= 35) { verdict = 'Tight';        verdictColor = 'var(--orange)'; }
+      else                  { verdict = 'Bad idea';     verdictColor = 'var(--red)'; }
+
+      return { score, verdict, verdictColor, flags, monthlyPayment, totalCost, interestPaid,
+               paymentPct, cashUsedPct, oldDti, newDti, oldRunway, newRunway, isCash };
+    },
+
     processRecurring() {
       // Auto-post recurring expenses if their nextDate is today or past and not already posted this cycle
       const d = El.state.get();
@@ -4036,6 +4217,25 @@ const El = {
         El.ai._pending = null;
         El.ai.addMsg('ai', '✅ Logged <b>' + esc(p.data.name) + '</b> (' + p.data.exercises + ' exercise' + (p.data.exercises!==1?'s':'') + ', ' + p.data.sets + ' sets). Great work! 💪');
         if (El.nav.current === 'fitness') El.render.fitness();
+      } else if (p.type === 'set_budget') {
+        if (!d.budget) d.budget = { categories: [], transactions: [] };
+        if (!d.budget.categories) d.budget.categories = [];
+        if (p.data.isNew || !p.data.categoryId) {
+          d.budget.categories.push({
+            id: El.uid(),
+            name: p.data.categoryName,
+            allocated: p.data.amount,
+            icon: p.data.icon || '💰',
+            color: p.data.color || '#7c6aff'
+          });
+        } else {
+          const cat = d.budget.categories.find(c => c.id === p.data.categoryId);
+          if (cat) cat.allocated = p.data.amount;
+        }
+        El.state.save();
+        El.ai._pending = null;
+        El.ai.addMsg('ai', '✅ Budget for <b>' + esc(p.data.categoryName) + '</b> set to <b>' + El.fmt(p.data.amount) + '/mo</b>. Check the Finance tab to see it.');
+        if (El.nav.current === 'finance') El.render.financeTab('budget');
       }
     },
     cancelAdd() {
@@ -4256,6 +4456,45 @@ const El = {
       catch(e) { El.ui.showToast('🎤 Could not start microphone: ' + e.message); }
     },
     _initialized: false,
+    // Send the OK-to-Buy form to the configured AI for a deeper take.
+    // Uses the same provider/model as chat (Auto routes to Opus/GPT-4.1 because
+    // "should I buy" matches the heavy-question pattern).
+    async analyzePurchaseFromForm() {
+      if (!this.isConfigured()) {
+        El.ui.showToast('Set up an API key in Settings → El AI Provider first.');
+        return;
+      }
+      const item   = document.getElementById('ob-item')?.value.trim() || 'this purchase';
+      const price  = parseFloat(document.getElementById('ob-price')?.value) || 0;
+      const fin    = document.getElementById('ob-finance')?.checked;
+      const down   = fin ? (parseFloat(document.getElementById('ob-down')?.value) || 0) : 0;
+      const months = fin ? (parseFloat(document.getElementById('ob-months')?.value) || 0) : 0;
+      const apr    = fin ? (parseFloat(document.getElementById('ob-apr')?.value) || 0) : 0;
+      if (!price) { El.ui.showToast('Enter a price first.'); return; }
+      const out = document.getElementById('ob-ai-result');
+      const btn = document.getElementById('ob-ai-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Asking El…'; }
+      if (out) out.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">El is thinking…</div>';
+      const verdict = El.finance.evaluateBuy({ price, downPayment: down, months, apr });
+      const question = `Should I buy ${item} for $${price}${fin ? ' financed at '+apr+'% APR over '+months+' months with $'+down+' down' : ' in cash'}? My local verdict is "${verdict.verdict}" (score ${verdict.score}/100). Give the structured Verdict / Why / Before you buy / Best way to afford it response. Be specific to my numbers.`;
+      try {
+        const d = El.state.get();
+        const provider = d.settings?.aiProvider;
+        const apiKey = (d.settings?.aiApiKey || '').trim();
+        const systemPrompt = this.buildSystemPrompt();
+        const reply = provider === 'claude'
+          ? await this.callClaude(apiKey, systemPrompt, question)
+          : await this.callOpenAI(apiKey, systemPrompt, question);
+        const cleaned = this.stripElActions(reply)
+          .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+          .replace(/\n/g, '<br>');
+        if (out) out.innerHTML = '<div style="background:var(--bg);border-radius:12px;padding:14px;font-size:14px;line-height:1.6;color:var(--text)">'+cleaned+'</div>';
+      } catch(e) {
+        if (out) out.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px 0">⚠️ '+this.escapeHtml(e.message)+'</div>';
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Ask El for deeper analysis'; }
+      }
+    },
     // True only when the user has selected Claude/OpenAI AND saved an API key.
     // The built-in keyword matcher is intentionally not enough — capture and
     // chat both need a real model to be useful.
@@ -4456,6 +4695,7 @@ const El = {
         'debt': 'Debt ready to add ✓',
         'savings': 'Savings goal ready ✓',
         'budget': 'Budget updated ✓',
+        'set_budget': 'Budget update ready ✓',
         'fitness': 'Fitness entry ready ✓',
         'reminder': 'Reminder set ✓',
         'recurring': 'Recurring item ready ✓'
@@ -4587,6 +4827,38 @@ const El = {
         return true;
       }
 
+      if (type === 'set_budget') {
+        const amount = money(data.amount);
+        const catName = String(data.category || data.name || '').trim();
+        if (!catName || amount < 0) return false;
+        const cats = (d.budget && d.budget.categories) || [];
+        const existing = cats.find(c => c.name.toLowerCase() === catName.toLowerCase())
+          || this.categoryForName(catName);
+        const isExisting = existing && existing.id && cats.some(c => c.id === existing.id);
+        const newCatColor = data.color || '#7c6aff';
+        const newCatIcon = data.icon || '💰';
+        pending = { type:'set_budget', data:{
+          categoryId: isExisting ? existing.id : null,
+          categoryName: isExisting ? existing.name : catName,
+          icon: isExisting ? existing.icon : newCatIcon,
+          color: isExisting ? existing.color : newCatColor,
+          amount,
+          previousAmount: isExisting ? (existing.allocated||0) : 0,
+          isNew: !isExisting
+        }};
+        this._pending = pending;
+        const verb = pending.data.isNew ? 'Create' : (pending.data.previousAmount === amount ? 'Re-confirm' : 'Update');
+        const detail = pending.data.isNew
+          ? 'New category at ' + El.fmt(amount) + '/mo'
+          : 'Was ' + El.fmt(pending.data.previousAmount) + '/mo → now ' + El.fmt(amount) + '/mo';
+        this.addMsg('ai', 'I can ' + verb.toLowerCase() + ' that budget:<br><br>' +
+          '<div style="background:var(--bg);border-radius:12px;padding:14px;margin:4px 0">' +
+          '<div style="font-weight:700;color:var(--text);margin-bottom:6px">' + this.escapeHtml(pending.data.icon) + ' ' + this.escapeHtml(pending.data.categoryName) + '</div>' +
+          '<div style="font-size:13px;color:var(--text2)">' + detail + '</div></div>' +
+          this.confirmButtons(verb + ' Budget'));
+        return true;
+      }
+
       return false;
     },
     confirmButtons(label, editFn) {
@@ -4596,120 +4868,132 @@ const El = {
         '<button onclick="El.haptic();El.ai.cancelAdd()" style="background:none;border:none;color:var(--text3);border-radius:20px;padding:8px 12px;font-size:20px;line-height:1;cursor:pointer">×</button>' +
         '</div><div style="font-size:11px;color:var(--text3);margin-top:4px;text-align:center">or swipe down to dismiss</div>';
     },
-    buildSystemPrompt() {
+    // Compact, mostly-static instructions block. Cached by Anthropic
+    // (cache_control: ephemeral) so most input tokens come for free on
+    // repeat turns within ~5 minutes.
+    _STATIC_PROMPT: `You are El, a personal finance and life assistant. Be concise. Use **bold** for key numbers.
+
+ACTIONS — when the user mentions any of these, silently append [[EL_ACTION:{"type":..,"data":{..}}]] JSON blocks (each on its own line at the very END of your reply, no explanation):
+• transaction: {description, amount, transactionType:"expense"|"income", category, date}
+• income: {name, amount, frequency:"weekly"|"biweekly"|"monthly"|"yearly", lastPayDate?}
+• debt: {name, balance, apr, minPayment, debtType:"credit_card"|"auto"|"student"|"mortgage"|"personal"}
+• savings: {name, target, current, monthly}
+• event: {title, date, time, notes}
+• log_food: {name, calories, protein, carbs, fat}
+• log_workout: {name, exercises:[{name,sets,reps,weight}]}
+• set_budget: {category, amount}   ← updates that category's monthly limit (creates if missing)
+
+Multiple items → multiple action blocks, each on its own line. Do NOT mention the blocks.
+
+Frequency parsing: monthly / "the 15th" → monthly · "biweekly" / "every 2 weeks" → biweekly · "weekly" → weekly · "annually" → yearly.
+
+For food, estimate calories/macros from the portion if not given.
+
+PURCHASE QUESTIONS — When the user asks "should I buy", "ok to buy", "good idea to (buy|finance|borrow)", or "can I afford" something, respond in this exact shape:
+**Verdict:** [Bad idea | Tight | Manageable | Within means]
+**Why:** 2-3 specific bullets grounded in their numbers.
+**Before you buy:** 2-3 concrete steps.
+**Best way to afford it:** one short paragraph.
+Do not emit any [[EL_ACTION]] for these — they are advice questions, not capture.`,
+
+    // Dynamic snapshot — sent fresh every turn (caps applied so it stays small).
+    buildDynamicContext() {
       const d = El.state.get();
       const income = El.getIncome(d);
       const totalDebt = (d.debts||[]).reduce((s,x)=>s+x.balance,0);
       const totalSavings = (d.savings||[]).reduce((s,x)=>s+x.current,0);
       const totalAccounts = (d.accounts||[]).reduce((s,x)=>s+x.balance,0);
 
-      // Schedule: next 14 days
+      // Caps: avoid token bloat for users with lots of data.
+      const TOP = 10;
+      const RECENT_TXN_CAP = 12;
+      const TXN_CAP_TOTAL = 60;
+
       const today = El.today();
       const in14 = new Date(); in14.setDate(in14.getDate()+14);
       const in14str = El.dateKey(in14);
-      const upcomingEvents = (d.events||[])
+      const upcoming = (d.events||[])
         .filter(e => e.date >= today && e.date <= in14str)
-        .sort((a,b) => a.date > b.date ? 1 : -1);
-      const scheduleLines = upcomingEvents.length
-        ? upcomingEvents.map(e => {
-            const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(e.date+'T12:00:00').getDay()];
-            return dow + ' ' + e.date + (e.time ? ' at ' + e.time : '') + ' — ' + e.title + (e.notes ? ' (' + e.notes + ')' : '');
-          }).join('\n')
-        : 'No upcoming events';
+        .sort((a,b) => a.date > b.date ? 1 : -1)
+        .slice(0, 10);
+      const scheduleLines = upcoming.length
+        ? upcoming.map(e => e.date + (e.time ? ' '+e.time : '') + ' — ' + e.title).join('\n')
+        : 'none';
 
-      // Workouts
-      const wktTemplates = (d.workouts && d.workouts.templates)||[];
-      const workoutLines = wktTemplates.length
-        ? wktTemplates.map(w => w.name + ': ' + w.exercises.map(e => e.name+' '+e.sets+'x'+e.reps+(e.weight>0?' @'+e.weight+'lbs':'')).join(', ')).join('\n')
-        : 'No workout templates saved';
-      const recentSessions = ((d.workouts&&d.workouts.log)||[]).slice().reverse().slice(0,5);
-      const sessionLines = recentSessions.length
-        ? recentSessions.map(s => s.date+': '+s.name+' ('+s.sets+' sets)').join('\n') : 'None';
+      const debts = (d.debts||[]).slice(0, TOP);
+      const savings = (d.savings||[]).slice(0, TOP);
 
-      // Today macros
-      const macroGoals = (d.macros&&d.macros.goals)||{calories:2000,protein:150,carbs:200,fat:65};
-      const todayMacros = ((d.macros&&d.macros.log)||[]).filter(e=>e.date===today);
-      const mt = todayMacros.reduce((a,e)=>{ a.cal+=e.calories||0;a.p+=e.protein||0;a.c+=e.carbs||0;a.f+=e.fat||0;return a; },{cal:0,p:0,c:0,f:0});
-
-      // This month transactions
       const ym = today.substr(0,7);
-      const mTxns = (d.budget&&d.budget.transactions||[]).filter(t=>t.date&&t.date.startsWith(ym));
+      const mTxns = ((d.budget&&d.budget.transactions)||[]).filter(t=>t.date&&t.date.startsWith(ym)).slice(-TXN_CAP_TOTAL);
       const mSpent = mTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
       const mIncome = mTxns.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
-      const recentTxns = [...mTxns].sort((a,b)=>b.date>a.date?1:-1).slice(0,8).map(t=>(t.type==='income'?'+':'-')+El.fmt(t.amount)+' '+t.description).join(', ');
+      const recentTxns = [...mTxns].sort((a,b)=>b.date>a.date?1:-1).slice(0, RECENT_TXN_CAP)
+        .map(t=>(t.type==='income'?'+':'-')+El.fmt(t.amount)+' '+t.description).join(', ');
 
-      const goalPlan = d.workouts&&d.workouts.goalPlan;
+      const cats = ((d.budget&&d.budget.categories)||[])
+        .map(c => c.name + ' ' + El.fmt(c.allocated||0)).join(', ');
 
-      return `You are El, a personal finance and life assistant. You have full access to the user's live data below — answer questions about their schedule, workouts, finances, and nutrition directly from it. Be concise and friendly.
+      const macroGoals = (d.macros&&d.macros.goals)||{calories:2000,protein:150,carbs:200,fat:65};
+      const todayMacros = ((d.macros&&d.macros.log)||[]).filter(e=>e.date===today);
+      const mt = todayMacros.reduce((a,e)=>{ a.cal+=e.calories||0;a.p+=e.protein||0;return a; },{cal:0,p:0});
 
-USER: ${d.profile.name||'User'} · ${d.profile.currency||'USD'} · Income: ${El.fmt(income)}/mo · Risk: ${d.profile.riskTolerance||'moderate'}
+      return `USER: ${d.profile.name||'User'} · ${d.profile.currency||'USD'} · Income: ${El.fmt(income)}/mo · Risk: ${d.profile.riskTolerance||'moderate'}
+Today: ${today} (${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date().getDay()]})
 
-FINANCES:
+FINANCES (capped):
 - Net worth: ${El.fmt(totalAccounts+totalSavings-totalDebt)}
-- Debt: ${El.fmt(totalDebt)}${(d.debts||[]).length ? ' — '+d.debts.map(x=>x.name+' '+El.fmt(x.balance)+' at '+x.apr+'% APR').join(', ') : ''}
-- Savings: ${El.fmt(totalSavings)}${(d.savings||[]).length ? ' — '+d.savings.map(x=>x.name+' '+El.fmt(x.current)+'/'+El.fmt(x.target)).join(', ') : ''}
-- This month spent: ${El.fmt(mSpent)} / earned: ${El.fmt(mIncome||income)}
-- Recent transactions: ${recentTxns||'none'}
-- Assumptions: ${d.assumptions?.returnRate||7}% return, ${d.assumptions?.inflationRate||3}% inflation, ${d.assumptions?.taxRate||22}% tax
+- Debt: ${El.fmt(totalDebt)}${debts.length ? ' — '+debts.map(x=>x.name+' '+El.fmt(x.balance)+' @'+x.apr+'% (min '+El.fmt(x.minPayment)+')').join(', ') : ''}
+- Savings: ${El.fmt(totalSavings)}${savings.length ? ' — '+savings.map(x=>x.name+' '+El.fmt(x.current)+'/'+El.fmt(x.target)).join(', ') : ''}
+- This month: spent ${El.fmt(mSpent)} / earned ${El.fmt(mIncome||income)}
+- Recent: ${recentTxns||'none'}
+- Budget categories: ${cats||'none set'}
+- Assumptions: ${d.assumptions?.returnRate||7}% return / ${d.assumptions?.inflationRate||3}% infl / ${d.assumptions?.taxRate||22}% tax
 
-SCHEDULE — next 14 days (today is ${today}, ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]}):
+NEXT 14 DAYS:
 ${scheduleLines}
 
-FITNESS:
-Workout templates (saved in library):
-${workoutLines}
+NUTRITION today: ${mt.cal}/${macroGoals.calories} cal · ${mt.p}/${macroGoals.protein}g protein`;
+    },
 
-Recent workout sessions:
-${sessionLines}
-
-Today's nutrition:
-- Daily targets: ${macroGoals.calories} cal / ${macroGoals.protein}g protein / ${macroGoals.carbs}g carbs / ${macroGoals.fat}g fat
-- Logged so far today: ${mt.cal} cal / ${mt.p}g protein / ${mt.c}g carbs / ${mt.f}g fat
-- Remaining: ${Math.max(0,macroGoals.calories-mt.cal)} cal / ${Math.max(0,macroGoals.protein-mt.p)}g protein
-${goalPlan ? '- Active fitness goal: '+goalPlan.goal : ''}
-
-FUNCTION CALLS — CRITICAL: Whenever the user mentions ANY of the following, you MUST silently append [[EL_ACTION:...]] JSON block(s) on their own line(s) at the very end of your reply. Triggers:
-• A purchase, expense, or payment ("I spent", "I bought", "paid for", "cost me", "$X on Y")
-• Income or pay ("I make", "I earn", "I get paid", "my salary is", "paycheck", "I bring home")
-• A debt or loan ("I owe", "credit card balance", "car loan", "student loan", "balance of")
-• A savings goal ("saving up for", "want to save", "saving $X for")
-• A calendar event, appointment, task, or reminder (any future date + activity)
-• Food eaten or a meal (any food/drink with an amount or portion)
-• A workout or exercise session completed
-
-MULTIPLE ITEMS — CRITICAL: If the user mentions MORE THAN ONE item to add (e.g. two income sources, multiple debts, an expense and an event), you MUST emit a SEPARATE [[EL_ACTION:...]] block for EACH item. Each block on its own line at the end.
-Example: "I get paid $3924 monthly and $2924 biweekly" → TWO separate income blocks, one monthly and one biweekly.
-
-Format — put these EXACTLY at the end of your reply, each on its own line, with no explanation:
-[[EL_ACTION:{"type":"transaction","data":{"description":"groceries","amount":50,"transactionType":"expense","category":"food","date":"${El.today()}"}}]]
-
-Types and required fields:
-• transaction: description, amount, transactionType (expense|income), category, date (YYYY-MM-DD)
-• income: name, amount, frequency (weekly|biweekly|monthly|yearly), lastPayDate (YYYY-MM-DD if mentioned)
-• debt: name, balance, apr, minPayment, debtType (credit_card|auto|student|mortgage|personal)
-• savings: name, target, current (0 if unknown), monthly (0 if unknown)
-• event: title, date (YYYY-MM-DD), time (HH:MM or ""), notes
-• log_food: name, calories (estimate if not given), protein, carbs, fat
-• log_workout: name, exercises:[{name, sets, reps, weight}]
-
-FREQUENCY RULES — parse these phrases exactly:
-• "every month" / "monthly" / "once a month" / "on the 1st/15th" → frequency: "monthly"
-• "bi weekly" / "biweekly" / "every 2 weeks" / "every other week" → frequency: "biweekly"
-• "every week" / "weekly" / "once a week" → frequency: "weekly"
-• "every year" / "annually" / "once a year" → frequency: "yearly"
-
-PAYDAY RULE: If user mentions a pay amount AND a start/last pay date, include lastPayDate in the income action.
-ESTIMATE: For food, always estimate calories/macros from the portion even if user doesn't specify.
-DO NOT say you've saved or added anything — the app shows a confirmation card automatically. Do NOT mention or explain the [[EL_ACTION:...]] blocks. Just include them silently.
-Use **bold** for key numbers.`;
+    // Backward-compat: returns one big string (used by tests + OpenAI).
+    buildSystemPrompt() {
+      return this._STATIC_PROMPT + '\n\n---\n\n' + this.buildDynamicContext();
+    },
+    // Map "auto" or a specific model to the actual model id.
+    // Auto routing: lite → Haiku, heavy → Opus, default → Sonnet.
+    pickClaudeModel(userMessage) {
+      const setting = El.state.get()?.settings?.aiClaudeModel || 'auto';
+      if (setting && setting !== 'auto') return setting;
+      const t = String(userMessage || '').toLowerCase();
+      const len = t.length;
+      const heavy = /\b(plan|strategy|long.term|in 5 years|10 years|retirement|deep|analyze|compare|trade.?off|opportunity cost|optimal|comprehensive|simulate|scenario)\b/.test(t)
+        || /\b(ok to buy|should i buy|good idea to (buy|finance|borrow)|can i afford)\b/.test(t)
+        || len > 400;
+      const lite = len < 60
+        || /^(add|log|spent|paid|bought|owe|saved|got paid|i ate|workout)\b/i.test(t);
+      if (heavy) return 'claude-opus-4-6';
+      if (lite)  return 'claude-haiku-4-5-20251001';
+      return 'claude-sonnet-4-6';
     },
     async callClaude(apiKey, systemPrompt, userMessage) {
-      // history.slice(-9,-1) = last 8 messages EXCLUDING the one just pushed (current user msg)
       const messages = this.history.slice(-9, -1).map(m=>({
         role: m.role==='ai' ? 'assistant' : 'user',
         content: m.content.replace(/<[^>]+>/g,'').replace(/&quot;/g,'"').replace(/&amp;/g,'&')
       }));
       messages.push({ role:'user', content: userMessage });
+
+      // Two-block system: static (cached, ~90% off on repeat) + dynamic (fresh each turn).
+      const staticBlock = this._STATIC_PROMPT;
+      const dynamicBlock = (typeof systemPrompt === 'string' && systemPrompt.includes('\n---\n'))
+        ? systemPrompt.split('\n---\n')[1].trim()
+        : this.buildDynamicContext();
+      const systemBlocks = [
+        { type: 'text', text: staticBlock, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: dynamicBlock }
+      ];
+
+      const model = this.pickClaudeModel(userMessage);
+      this._lastModel = model;
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method:'POST',
         headers:{
@@ -4718,7 +5002,7 @@ Use **bold** for key numbers.`;
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true'
         },
-        body: JSON.stringify({ model:(El.state.get()?.settings?.aiClaudeModel||'claude-sonnet-4-6'), max_tokens:800, system: systemPrompt, messages })
+        body: JSON.stringify({ model, max_tokens:800, system: systemBlocks, messages })
       });
       if (!res.ok) {
         const err = await res.json().catch(()=>({}));
@@ -4727,6 +5011,20 @@ Use **bold** for key numbers.`;
       const data = await res.json();
       return data.content[0].text;
     },
+    pickOpenAiModel(userMessage) {
+      const setting = El.state.get()?.settings?.aiOpenAiModel || 'auto';
+      if (setting && setting !== 'auto') return setting;
+      const t = String(userMessage || '').toLowerCase();
+      const len = t.length;
+      const heavy = /\b(plan|strategy|long.term|in 5 years|10 years|retirement|deep|analyze|compare|trade.?off|opportunity cost|optimal|comprehensive|simulate|scenario)\b/.test(t)
+        || /\b(ok to buy|should i buy|good idea to (buy|finance|borrow)|can i afford)\b/.test(t)
+        || len > 400;
+      const lite = len < 60
+        || /^(add|log|spent|paid|bought|owe|saved|got paid|i ate|workout)\b/i.test(t);
+      if (heavy) return 'gpt-4.1';
+      if (lite)  return 'gpt-4o-mini';
+      return 'gpt-4o';
+    },
     async callOpenAI(apiKey, systemPrompt, userMessage) {
       const messages = [{ role:'system', content: systemPrompt }];
       this.history.slice(-9, -1).forEach(m=>messages.push({
@@ -4734,10 +5032,12 @@ Use **bold** for key numbers.`;
         content: m.content.replace(/<[^>]+>/g,'').replace(/&quot;/g,'"').replace(/&amp;/g,'&')
       }));
       messages.push({ role:'user', content: userMessage });
+      const model = this.pickOpenAiModel(userMessage);
+      this._lastModel = model;
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method:'POST',
         headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+apiKey },
-        body: JSON.stringify({ model:'gpt-4o-mini', max_tokens:800, messages })
+        body: JSON.stringify({ model, max_tokens:800, messages })
       });
       if (!res.ok) {
         const err = await res.json().catch(()=>({}));
@@ -5379,6 +5679,8 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       if (g) g.style.display = p === 'builtin' ? 'none' : 'block';
       const mg = document.getElementById('ai-claude-model-group');
       if (mg) mg.style.display = p === 'claude' ? 'block' : 'none';
+      const og = document.getElementById('ai-openai-model-group');
+      if (og) og.style.display = p === 'openai' ? 'block' : 'none';
       const tb = document.getElementById('ai-test-btn');
       if (tb) tb.style.display = 'none';
     },
@@ -5390,7 +5692,8 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       if (!d.settings) d.settings = {};
       d.settings.aiProvider = provider;
       d.settings.aiApiKey = apiKey;
-      d.settings.aiClaudeModel = document.getElementById('ai-claude-model')?.value || d.settings.aiClaudeModel || 'claude-sonnet-4-6';
+      d.settings.aiClaudeModel = document.getElementById('ai-claude-model')?.value || d.settings.aiClaudeModel || 'auto';
+      d.settings.aiOpenAiModel = document.getElementById('ai-openai-model')?.value || d.settings.aiOpenAiModel || 'auto';
       El.state.save();
       const tb = document.getElementById('ai-test-btn');
       if (tb) tb.style.display = (provider !== 'builtin' && apiKey) ? 'inline-flex' : 'none';
@@ -5416,7 +5719,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
           const r = await fetch('https://api.anthropic.com/v1/messages', {
             method:'POST',
             headers:{ 'Content-Type':'application/json', 'x-api-key':apiKey, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' },
-            body: JSON.stringify({ model:(d.settings?.aiClaudeModel||'claude-sonnet-4-6'), max_tokens:60, system:'You are a helpful assistant.', messages:[{ role:'user', content:'Say "Connection successful!" and nothing else.' }] })
+            body: JSON.stringify({ model:((d.settings?.aiClaudeModel && d.settings.aiClaudeModel!=='auto') ? d.settings.aiClaudeModel : 'claude-haiku-4-5-20251001'), max_tokens:60, system:'You are a helpful assistant.', messages:[{ role:'user', content:'Say "Connection successful!" and nothing else.' }] })
           });
           if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error((e.error?.message||'API error')+' (HTTP '+r.status+')'); }
           const data = await r.json(); reply = data.content[0].text;
@@ -5424,7 +5727,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
           const r = await fetch('https://api.openai.com/v1/chat/completions', {
             method:'POST',
             headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+apiKey },
-            body: JSON.stringify({ model:'gpt-4o-mini', max_tokens:60, messages:[{ role:'user', content:'Say "Connection successful!" and nothing else.' }] })
+            body: JSON.stringify({ model:((d.settings?.aiOpenAiModel && d.settings.aiOpenAiModel!=='auto') ? d.settings.aiOpenAiModel : 'gpt-4o-mini'), max_tokens:60, messages:[{ role:'user', content:'Say "Connection successful!" and nothing else.' }] })
           });
           if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error((e.error?.message||'API error')+' (HTTP '+r.status+')'); }
           const data = await r.json(); reply = data.choices[0].message.content;

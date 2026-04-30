@@ -1,7 +1,7 @@
 // Bump BUILD on every release to invalidate the SW cache automatically.
 // Keep this string in sync with EL_BUILD in index.html and the
 // "<!-- El fix build: ... -->" comment in index.html.
-const BUILD = '2026-04-29-bug-fixes-v3';
+const BUILD = '2026-04-29-bug-fixes-v4';
 const EL_CACHE = 'el-pages-' + BUILD;
 const APP_SHELL = [
   './',
@@ -40,13 +40,4 @@ self.addEventListener('fetch', event => {
       return fetch(event.request).then(response => {
         if (response && response.ok) {
           const copy = response.clone();
-          caches.open(EL_CACHE).then(cache => cache.put(event.request, copy));
-        }
-        return response;
-      }).catch(() => {
-        if (event.request.mode === 'navigate') return caches.match('./index.html');
-        return caches.match(event.request);
-      });
-    })
-  );
-});
+          caches.open(EL_CACHE).then(cache => cache.
