@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29-bug-fixes-v10 hotfix-nowd-safe-mode -->
+<!-- El fix build: 2026-04-29-bug-fixes-v11 api-key-banner-fit -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-04-29-bug-fixes-v10';</script>
+<script>window.EL_BUILD = '2026-04-29-bug-fixes-v11';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -1774,9 +1774,9 @@ const El = {
           <div class="quick-capture-title">Capture</div>
           <div class="quick-capture-sub">Calendar, money, food, workouts, reminders, and messy thoughts.</div>
           ${!El.ai.isConfigured() ? `
-            <div onclick="El.nav.go('settings')" style="cursor:pointer;background:rgba(124,106,255,0.08);border:1px solid rgba(124,106,255,0.25);border-radius:12px;padding:10px 12px;margin:6px 0 10px;font-size:12px;color:var(--text2);line-height:1.4">
-              <b style="color:var(--primary)">Add an API key to unlock smart capture.</b><br>
-              Without it, capture won\'t parse natural language like "dentist Thu 2pm" or log expenses automatically. Tap to open Settings → El AI Provider.
+            <div onclick="El.nav.go('settings')" style="cursor:pointer;background:rgba(124,106,255,0.08);border:1px solid rgba(124,106,255,0.25);border-radius:12px;padding:10px 12px;margin:6px 0 10px;font-size:12px;color:var(--text2);line-height:1.45;word-break:break-word;overflow-wrap:anywhere;box-sizing:border-box;width:100%">
+              <b style="color:var(--primary);display:block;margin-bottom:2px">Add an API key to use Capture</b>
+              <span style="display:block">Without one, El can\'t parse natural language. Tap to set up in Settings.</span>
             </div>` : ''}
           <div class="quick-capture-row">
             <textarea class="quick-capture-input" id="quick-capture-input" rows="1" placeholder="Dentist next Thu at 2pm"
@@ -5307,9 +5307,9 @@ const El = {
           saved.forEach(m => this.addMsg(m.role, m.content));
         } else if (!this.isConfigured()) {
           this.addMsg('ai',
-            `Hey ${this.escapeHtml(d.profile.name)}! El AI needs an API key to chat. ` +
-            `Tap <b>Settings → El AI Provider</b>, choose Claude or ChatGPT, paste your key, and Save. ` +
-            `Once it's in, I can answer finance questions, log expenses, and add things to your calendar from a single sentence.`
+            `Hey ${this.escapeHtml(d.profile.name)}! El AI needs an API key.<br><br>` +
+            `Open <b>Settings</b> → <b>El AI Provider</b>, pick Claude or ChatGPT, paste your key, Save.<br><br>` +
+            `Then I can log expenses, add events, and answer questions from one sentence.`
           );
         } else {
           this.addMsg('ai', `Hey ${this.escapeHtml(d.profile.name)}! I'm El — your everyday life assistant. Ask me anything, or try telling me about a debt like "I owe $4,500 on my Chase card at 22% APR" or your schedule like "I work out Mon/Wed/Fri at 6am" and I'll offer to add it automatically!`);
@@ -5842,7 +5842,7 @@ NUTRITION today: ${mt.cal}/${macroGoals.calories} cal · ${mt.p}/${macroGoals.pr
       if (provider !== 'builtin') {
         if (!apiKey) {
           this.hideTyping();
-          this.addMsg('ai', '⚠️ <b>AI setup needed:</b> You selected ' + provider + ', but no API key is saved. Go to Settings → El AI Provider, paste your key, Save, then Test Connection.');
+          this.addMsg('ai', '⚠️ <b>AI setup needed</b><br><br>You selected <b>' + provider + '</b> but no API key is saved.<br><br>Open <b>Settings</b> → <b>El AI Provider</b>, paste your key, then Save.');
           this.history.push({ role:'ai', content:'AI setup needed: missing API key.' });
           this.saveHistory();
           return;
@@ -7200,6 +7200,12 @@ document.addEventListener('DOMContentLoaded', () => {
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
+=> {});
   });
 }
 </script>
