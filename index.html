@@ -785,7 +785,7 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
 .food-log-item { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
 #confetti-canvas { position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;display:none; }
 .txn-swipe-wrap { position:relative;overflow:hidden;border-radius:var(--radius-sm);margin-bottom:2px; }
-.txn-swipe-inner { transition:transform 0.18s ease;background:var(--card);cursor:pointer;width:100%;box-sizing:border-box; }
+.txn-swipe-inner { transition:transform 0.18s ease;background:var(--card);cursor:pointer;width:100%;box-sizing:border-box;position:relative;z-index:1; }
 .txn-swipe-inner:active { opacity:0.85; }
 .txn-delete-reveal { position:absolute;right:0;top:0;bottom:0;width:80px;background:var(--red);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;border-radius:0 var(--radius-sm) var(--radius-sm) 0; }
 </style>
@@ -7075,34 +7075,66 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         `Financial plan: ${parsed.financialPlan.length ? parsed.financialPlan.length + ' items' : '⚠️ none parsed'}`,
         `Calendar events: ${parsed.events.length ? parsed.events.length + ' events' : 'none'}`,
       ].join('\n');
-      const msg = 'Spreadsheet parsed — verify before importing:\n\n' + lines + '\n\nThis will REPLACE all financial data. Workouts, macros, and history are preserved.\n\nContinue?';
-      if (!confirm(msg)) return;
+      const choice = window.prompt(
+        'Spreadsheet parsed — verify before importing:\n\n' + lines +
+        '\n\nHow do you want to import?\n' +
+        '  Type R = Replace (clean slate — overwrites current financial data)\n' +
+        '  Type M = Merge (adds new items alongside existing data)\n' +
+        '  Cancel = abort',
+        'R'
+      );
+      if (!choice) return;
+      const mode = choice.trim().toUpperCase();
+      if (mode !== 'R' && mode !== 'M') { El.ui.showToast('Import cancelled.', 'info', 2000); return; }
       const existing = El.state.load() || {};
-      // Always do a full clean replace of all financial data — never mix with existing
-      // to ensure the score is deterministic and matches the spreadsheet exactly.
-      const merged = {
-        profile:    Object.assign({}, existing.profile || {}, parsed.profile || {}),
-        debts:      parsed.debts,
-        savings:    parsed.savings,
-        accounts:   parsed.accounts,
-        recurring:  parsed.recurring,
-        events:     parsed.events,
-        financialPlan: parsed.financialPlan,
-        financialPlanNotes: parsed.financialPlanNotes || '',
-        budget: {
-          transactions: (existing.budget || {}).transactions || [],
-          categories: parsed.budget.categories,
-        },
-        workouts:        existing.workouts        || { templates: [], log: [] },
-        macros:          existing.macros          || { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] },
-        paidBills:       {},
-        netWorthHistory: existing.netWorthHistory || [],
-        aiHistory:       existing.aiHistory       || [],
-        settings:        existing.settings        || { currency: 'USD', theme: 'dark' },
-      };
+      let merged;
+      if (mode === 'R') {
+        // Replace: full clean replace of all financial data for consistent scores
+        merged = {
+          profile:    Object.assign({}, existing.profile || {}, parsed.profile || {}),
+          debts:      parsed.debts,
+          savings:    parsed.savings,
+          accounts:   parsed.accounts,
+          recurring:  parsed.recurring,
+          events:     parsed.events,
+          financialPlan: parsed.financialPlan,
+          financialPlanNotes: parsed.financialPlanNotes || '',
+          budget: {
+            transactions: (existing.budget || {}).transactions || [],
+            categories: parsed.budget.categories,
+          },
+        };
+      } else {
+        // Merge: append new items, deduplicate by name to avoid exact duplicates
+        const dedup = (arr, existing, key) => {
+          const names = new Set((existing || []).map(x => (x[key]||'').toLowerCase()));
+          return (existing || []).concat(arr.filter(x => !names.has((x[key]||'').toLowerCase())));
+        };
+        merged = {
+          profile:    Object.assign({}, existing.profile || {}, parsed.profile || {}),
+          debts:      dedup(parsed.debts, existing.debts || [], 'name'),
+          savings:    dedup(parsed.savings, existing.savings || [], 'name'),
+          accounts:   dedup(parsed.accounts, existing.accounts || [], 'name'),
+          recurring:  dedup(parsed.recurring, existing.recurring || [], 'description'),
+          events:     (existing.events || []).concat(parsed.events),
+          financialPlan: dedup(parsed.financialPlan, existing.financialPlan || [], 'text'),
+          financialPlanNotes: [existing.financialPlanNotes, parsed.financialPlanNotes].filter(Boolean).join('\n---\n'),
+          budget: {
+            transactions: (existing.budget || {}).transactions || [],
+            categories: dedup(parsed.budget.categories, (existing.budget || {}).categories || [], 'name'),
+          },
+        };
+      }
+      // Always preserve non-financial data
+      merged.workouts        = existing.workouts        || { templates: [], log: [] };
+      merged.macros          = existing.macros          || { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] };
+      merged.paidBills       = mode === 'R' ? {} : (existing.paidBills || {});
+      merged.netWorthHistory = existing.netWorthHistory || [];
+      merged.aiHistory       = existing.aiHistory       || [];
+      merged.settings        = existing.settings        || { currency: 'USD', theme: 'dark' };
       if (existing.profile && existing.profile.name) merged.profile.name = existing.profile.name;
       localStorage.setItem('el_data', JSON.stringify(merged));
-      El.ui.showToast('✅ Spreadsheet imported!', 'success', 3000);
+      El.ui.showToast(mode === 'R' ? '✅ Data replaced!' : '✅ Data merged!', 'success', 3000);
       setTimeout(() => location.reload(), 1000);
     },
     resetApp() {
