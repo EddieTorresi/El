@@ -3871,116 +3871,119 @@ const El = {
     healthScore() {
       return this.healthDetail().score;
     },
-    // Weighted financial-health breakdown.
+    // 3-component financial-health score (max 100 pts).
     healthDetail() {
       const d = El.state.get() || {};
-      const income = El.getIncome(d);
-      const totalDebt = (d.debts||[]).reduce((s,x)=>s+(x.balance||0),0);
-      const totalSavings = (d.savings||[]).reduce((s,x)=>s+(x.current||0),0);
-      const totalVehicleAssets = (d.accounts||[]).filter(a=>a.type==='asset').reduce((s,a)=>s+(a.balance||0),0);
-      const minPayments = (d.debts||[]).reduce((s,x)=>s+(x.minPayment||0),0);
-      const monthStr = El.monthKey(new Date());
-      const monthTxns = ((d.budget && d.budget.transactions) || [])
-        .filter(t => t.date && t.date.startsWith(monthStr));
-      const spent = monthTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
-      const totalAllocated = ((d.budget && d.budget.categories) || [])
-        .reduce((s,c)=>s+(c.allocated||0),0);
+      const monthlyIncome = El.getIncome(d);
 
-      if (!income && !spent && !totalSavings && !totalDebt) {
-        return { score: null, grade: '—', breakdown: [],
-          summary: 'Add income, savings, or debts to see your financial health score.' };
+      // Min payments from debts
+      const monthlyMinPayments = (d.debts||[]).reduce((s,x)=>s+(x.minPayment||0),0);
+
+      // Recurring expenses (type === 'expense'), frequency-adjusted
+      const monthlyRecurringExpenses = (d.recurring||[])
+        .filter(r=>r.type==='expense')
+        .reduce((s,r)=>{
+          const freq = r.frequency||'monthly';
+          const amt  = r.amount||0;
+          if (freq==='weekly')                         return s + amt * 4.33;
+          if (freq==='bi-weekly'||freq==='biweekly')  return s + amt * 2.17;
+          return s + amt;
+        }, 0);
+
+      // High-interest debt balance (APR > 15%)
+      const hiDebt = (d.debts||[]).filter(x=>(x.apr||0)>15).reduce((s,x)=>s+(x.balance||0),0);
+
+      // Liquid savings: all savings goals (current) + checking/savings/cash accounts (balance)
+      const liquidSavings = (d.savings||[]).reduce((s,x)=>s+(x.current||0),0)
+        + (d.accounts||[]).filter(a=>['checking','savings','cash'].includes(a.type)).reduce((s,a)=>s+(a.balance||0),0);
+
+      // Net worth
+      const totalAssets = (d.savings||[]).reduce((s,x)=>s+(x.current||0),0)
+        + (d.accounts||[]).filter(a=>a.type==='asset').reduce((s,a)=>s+(a.balance||0),0);
+      const totalDebt   = (d.debts||[]).reduce((s,x)=>s+(x.balance||0),0);
+      const netWorth    = totalAssets - totalDebt;
+
+      // No-data guard
+      if (!monthlyIncome && !totalDebt && !totalAssets) {
+        return { score:null, grade:'—', breakdown:[],
+          summary:'Add income, savings, or debts to see your financial health score.' };
       }
 
-      const breakdown = [];
+      // ── 1. DTI score (max 40 pts) ──────────────────────────────
+      let dtiPts, dtiPct;
+      if (monthlyIncome > 0) {
+        dtiPct = monthlyMinPayments / monthlyIncome;
+        if      (dtiPct < 0.20) dtiPts = 40;
+        else if (dtiPct < 0.36) dtiPts = 32;
+        else if (dtiPct < 0.43) dtiPts = 24;
+        else if (dtiPct < 0.50) dtiPts = 12;
+        else                    dtiPts = 0;
+      } else { dtiPts = 20; dtiPct = null; }
 
-      // 1. Emergency fund (25%)
-      const monthlyExpenses = spent || (income * 0.7) || 1;
-      const efMonths = totalSavings / monthlyExpenses;
-      let efScore;
-      if (efMonths >= 6) efScore = 100;
-      else if (efMonths >= 3) efScore = 80;
-      else if (efMonths >= 1) efScore = 55;
-      else if (efMonths > 0) efScore = 30;
-      else efScore = 0;
-      breakdown.push({ key:'emergency', label:'Emergency Fund', weight:25, score:efScore,
-        value: efMonths > 0 ? efMonths.toFixed(1) + ' mo' : 'None',
-        hint: efMonths >= 3 ? 'Solid cushion' : efMonths >= 1 ? 'Build to 3-6 months' : 'Start with $1,000 buffer' });
+      // ── 2. Surplus ratio score (max 30 pts) ───────────────────
+      let surplusPts, surplusRatio;
+      if (monthlyIncome > 0) {
+        surplusRatio = (monthlyIncome - monthlyMinPayments - monthlyRecurringExpenses) / monthlyIncome;
+        if      (surplusRatio >= 0.35) surplusPts = 30;
+        else if (surplusRatio >= 0.20) surplusPts = 24;
+        else if (surplusRatio >= 0.10) surplusPts = 18;
+        else if (surplusRatio >= 0.00) surplusPts = 10;
+        else                           surplusPts = 0;
+      } else { surplusPts = 15; surplusRatio = null; }
 
-      // 2. Debt-to-Income (25%)
-      let dtiScore, dtiValue, dtiHint;
-      if (income > 0) {
-        const dti = minPayments / income;
-        if (dti < 0.1) { dtiScore = 100; dtiHint = 'Very low'; }
-        else if (dti < 0.2) { dtiScore = 80; dtiHint = 'Healthy'; }
-        else if (dti < 0.36) { dtiScore = 55; dtiHint = 'Manageable'; }
-        else if (dti < 0.5) { dtiScore = 25; dtiHint = 'High — be careful'; }
-        else { dtiScore = 0; dtiHint = 'Critical — restructure'; }
-        dtiValue = Math.round(dti * 100) + '%';
-      } else {
-        dtiScore = 50; dtiValue = 'No income set'; dtiHint = 'Add income in Settings';
-      }
-      breakdown.push({ key:'dti', label:'Debt-to-Income', weight:25, score:dtiScore, value:dtiValue, hint:dtiHint });
+      // ── 3. High-interest debt score (max 30 pts) ─────────────
+      let hiDebtPts;
+      if      (hiDebt === 0)    hiDebtPts = 30;
+      else if (hiDebt <  2000)  hiDebtPts = 24;
+      else if (hiDebt <  5000)  hiDebtPts = 18;
+      else if (hiDebt < 10000)  hiDebtPts = 10;
+      else                      hiDebtPts = 0;
 
-      // 3. Net-worth health (20%)
-      const netWorth = totalSavings + totalVehicleAssets - totalDebt;
-      let nwScore, nwHint;
-      const totalAssets = totalSavings + totalVehicleAssets;
-      if (totalDebt === 0 && totalAssets > 0) { nwScore = 100; nwHint = 'Debt-free'; }
-      else if (totalDebt === 0) { nwScore = 70; nwHint = 'No debt — start saving'; }
-      else if (totalAssets >= totalDebt * 2) { nwScore = 95; nwHint = 'Assets 2x debt'; }
-      else if (totalAssets >= totalDebt) { nwScore = 80; nwHint = 'Assets cover debt'; }
-      else if (totalAssets >= totalDebt * 0.5) { nwScore = 55; nwHint = 'Halfway covered'; }
-      else if (totalAssets > 0) { nwScore = 30; nwHint = 'Debt outweighs assets'; }
-      else if (totalDebt > 0) { nwScore = 10; nwHint = 'Debt with no assets buffer'; }
-      else { nwScore = 50; nwHint = 'Building'; }
-      breakdown.push({ key:'networth', label:'Net Worth', weight:20, score:nwScore, value:El.fmt(netWorth), hint:nwHint });
+      const score = dtiPts + surplusPts + hiDebtPts;
 
-      // 4. Budget adherence (15%)
-      let budgetScore, budgetValue, budgetHint;
-      if (totalAllocated === 0) {
-        budgetScore = 50; budgetValue = 'No budget set'; budgetHint = 'Set category limits in Finance';
-      } else {
-        const ratio = spent / totalAllocated;
-        if (ratio <= 0.85) { budgetScore = 100; budgetHint = 'Well under budget'; }
-        else if (ratio <= 1.0) { budgetScore = 80; budgetHint = 'On track'; }
-        else if (ratio <= 1.15) { budgetScore = 50; budgetHint = 'Slightly over'; }
-        else if (ratio <= 1.5) { budgetScore = 25; budgetHint = 'Significantly over'; }
-        else { budgetScore = 0; budgetHint = 'Way over budget'; }
-        budgetValue = Math.round(ratio * 100) + '% used';
-      }
-      breakdown.push({ key:'budget', label:'Budget Adherence', weight:15, score:budgetScore, value:budgetValue, hint:budgetHint });
+      const grade = score>=80?'EXCELLENT':score>=65?'GOOD':score>=50?'FAIR':score>=35?'NEEDS WORK':'CRITICAL';
 
-      // 5. 30-day net-worth trend (15%)
-      const hist = (d.netWorthHistory||[]).slice(-30);
-      let trendScore, trendValue, trendHint;
-      if (hist.length < 2) {
-        trendScore = 50; trendValue = 'Building history'; trendHint = 'Need a few days of data';
-      } else {
-        const first = hist[0].value, last = hist[hist.length-1].value;
-        const change = last - first;
-        const base = Math.max(Math.abs(first), 1);
-        const pct = (change / base) * 100;
-        if (pct >= 5) { trendScore = 100; trendHint = 'Strong upward trend'; }
-        else if (pct >= 0) { trendScore = 80; trendHint = 'Trending up'; }
-        else if (pct >= -5) { trendScore = 50; trendHint = 'Roughly flat'; }
-        else if (pct >= -15) { trendScore = 25; trendHint = 'Trending down'; }
-        else { trendScore = 0; trendHint = 'Sharp drop'; }
-        trendValue = (change >= 0 ? '+' : '') + El.fmt(change);
-      }
-      breakdown.push({ key:'trend', label:'30-Day Trend', weight:15, score:trendScore, value:trendValue, hint:trendHint });
+      // ── Indicators (non-scoring) ──────────────────────────────
+      const monthlyExpenses = (monthlyRecurringExpenses + monthlyMinPayments) || (monthlyIncome * 0.7) || 1;
+      const liquidMonths    = liquidSavings / monthlyExpenses;
+      const savingsRate     = monthlyIncome > 0
+        ? (monthlyIncome - monthlyRecurringExpenses - monthlyMinPayments) / monthlyIncome * 100
+        : 0;
 
-      const weighted = breakdown.reduce((s,b) => s + (b.score * b.weight / 100), 0);
-      const score = Math.round(Math.max(1, Math.min(100, weighted)));
-      const grade = score>=90?'A+':score>=80?'A':score>=70?'B':score>=60?'C':score>=50?'D':'F';
-      const weakest = breakdown.slice().sort((a,b)=>a.score-b.score)[0];
-      const summary = score >= 80
-        ? 'Strong financial position. Keep it up.'
-        : score >= 60
-        ? 'Healthy overall — biggest opportunity: ' + weakest.label.toLowerCase() + '.'
-        : score >= 40
-        ? 'Mixed signals. Focus on ' + weakest.label.toLowerCase() + ' first.'
-        : 'Tight spot. Top priority: ' + weakest.label.toLowerCase() + '.';
-      return { score, grade, breakdown, summary };
+      // Breakdown array (backward-compat with AI chat — needs .score/.label/.value/.hint)
+      const breakdown = [
+        {
+          key:'dti', label:'Debt-to-Income', pts:dtiPts, maxPts:40,
+          score: Math.round(dtiPts/40*100),
+          value: dtiPct!=null ? Math.round(dtiPct*100)+'%' : 'No income set',
+          hint:  dtiPts===40?'Excellent — under 20%':dtiPts>=32?'Good — under 36%':dtiPts>=24?'Manageable — under 43%':dtiPts>=12?'High — near limit':'Critical — restructure debt'
+        },
+        {
+          key:'surplus', label:'Surplus Ratio', pts:surplusPts, maxPts:30,
+          score: Math.round(surplusPts/30*100),
+          value: surplusRatio!=null ? Math.round(surplusRatio*100)+'% of income' : 'No income set',
+          hint:  surplusPts===30?'Strong surplus — saving well':surplusPts>=24?'Healthy buffer':surplusPts>=18?'Thin margin':surplusPts>=10?'Very tight':'Spending exceeds income'
+        },
+        {
+          key:'hidebt', label:'High-Interest Debt', pts:hiDebtPts, maxPts:30,
+          score: Math.round(hiDebtPts/30*100),
+          value: hiDebt===0 ? 'None' : El.fmt(hiDebt)+' at >15% APR',
+          hint:  hiDebtPts===30?'No high-rate debt':hiDebtPts>=24?'Small amount — pay off soon':hiDebtPts>=18?'Meaningful — target aggressively':hiDebtPts>=10?'High — prioritize payoff':'Critical drag on finances'
+        }
+      ];
+
+      const summary = score>=80?'Strong financial position. Keep it up.'
+        :score>=65?'Good shape — a few areas to polish.'
+        :score>=50?'Fair — focus on the lowest-scoring component first.'
+        :score>=35?'Needs attention — address high-interest debt and surplus ratio.'
+        :'Tight spot — prioritize reducing debt and building a budget surplus.';
+
+      return {
+        score, grade, breakdown, summary,
+        dtiPts, surplusPts, hiDebtPts, dtiPct, surplusRatio,
+        hiDebt, liquidMonths, savingsRate, netWorth,
+        monthlyIncome, monthlyMinPayments, monthlyRecurringExpenses
+      };
     },
     // Renders the breakdown modal.
     openHealthBreakdown() {
@@ -3989,30 +3992,87 @@ const El = {
       if (!overlay) return;
       const body = document.getElementById('health-breakdown-body');
       const esc = s => El.ai.escapeHtml(String(s));
-      const scoreColor = detail.score==null ? 'var(--text3)'
-        : detail.score>=80?'var(--teal)':detail.score>=60?'#a8ff78':detail.score>=40?'var(--yellow)':detail.score>=20?'var(--orange)':'var(--red)';
-      const headline = detail.score == null
+      const fmt = v => El.fmt(v);
+
+      const scoreColor = detail.score==null?'var(--text3)'
+        :detail.score>=80?'var(--teal)':detail.score>=65?'#a8ff78':detail.score>=50?'var(--yellow)':detail.score>=35?'var(--orange)':'var(--red)';
+
+      const headline = detail.score==null
         ? '<div style="font-size:48px;font-weight:800;color:var(--text3);text-align:center;margin:8px 0">—</div>'
-          + '<div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:18px">' + esc(detail.summary) + '</div>'
+          + '<div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:18px">'+esc(detail.summary)+'</div>'
         : '<div style="display:flex;align-items:baseline;justify-content:center;gap:6px;margin:8px 0">'
-          + '<div style="font-size:52px;font-weight:800;color:' + scoreColor + ';line-height:1">' + detail.score + '</div>'
-          + '<div style="font-size:18px;color:var(--text3);font-weight:600">/ 100 · ' + detail.grade + '</div>'
+          + '<div style="font-size:52px;font-weight:800;color:'+scoreColor+';line-height:1">'+detail.score+'</div>'
+          + '<div style="font-size:18px;color:var(--text3);font-weight:600">/ 100</div>'
           + '</div>'
-          + '<div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:18px">' + esc(detail.summary) + '</div>';
-      const rows = detail.breakdown.map(b => {
-        const barColor = b.score>=80?'var(--teal)':b.score>=60?'#a8ff78':b.score>=40?'var(--yellow)':b.score>=20?'var(--orange)':'var(--red)';
-        return '<div style="margin-bottom:14px">'
-          + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">'
-          +   '<div><b>' + esc(b.label) + '</b> <span style="font-size:11px;color:var(--text3)">· ' + b.weight + '%</span></div>'
-          +   '<div style="font-size:13px;color:var(--text2)">' + esc(b.value) + '</div>'
-          + '</div>'
-          + '<div style="background:rgba(255,255,255,0.06);height:6px;border-radius:3px;overflow:hidden">'
-          +   '<div style="width:' + b.score + '%;height:100%;background:' + barColor + ';transition:width 0.4s ease"></div>'
-          + '</div>'
-          + '<div style="font-size:11px;color:var(--text3);margin-top:4px">' + esc(b.hint) + '</div>'
-          + '</div>';
-      }).join('');
-      body.innerHTML = headline + (rows || '<div style="color:var(--text2);font-size:13px;text-align:center;padding:8px 0">No data yet — add income, savings, or debts to see component scores.</div>');
+          + '<div style="text-align:center;font-size:20px;font-weight:700;color:'+scoreColor+';margin-bottom:4px">'+esc(detail.grade)+'</div>'
+          + '<div style="text-align:center;color:var(--text2);font-size:14px;margin-bottom:20px">'+esc(detail.summary)+'</div>';
+
+      // Status icon helper
+      const icon = (pts, max) => pts===max ? '✅' : pts===0 ? '❌' : '⚠️';
+
+      let rows = '';
+      if (detail.score == null) {
+        body.innerHTML = headline + '<div style="color:var(--text2);font-size:13px;text-align:center;padding:8px 0">No data yet — add income, savings, or debts to see your score.</div>';
+        El.ui.openModal('modal-health-breakdown');
+        return;
+      }
+
+      // Section header helper
+      const sectionHdr = txt => '<div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:var(--text3);margin:8px 0 10px;border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:6px">'+txt+'</div>';
+
+      // Row builder helper
+      const scoreRow = (label, pts, max, detail2, isLast) =>
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
+        + '<div style="font-weight:600;font-size:14px">'+label+'</div>'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+        +   '<span style="font-size:13px;color:var(--text2)">'+pts+'/'+max+'</span>'
+        +   '<span style="font-size:16px">'+icon(pts,max)+'</span>'
+        + '</div></div>'
+        + '<div style="font-size:12px;color:var(--text2);margin-bottom:'+(isLast?'4':'12')+'px;padding-left:8px">'+detail2+'</div>';
+
+      const indicatorRow = (label, value, iconStr, detail2, isLast) =>
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
+        + '<div style="font-weight:600;font-size:14px">'+label+'</div>'
+        + '<div style="display:flex;align-items:center;gap:8px">'
+        +   '<span style="font-size:13px;color:var(--text2)">'+value+'</span>'
+        +   '<span style="font-size:16px">'+iconStr+'</span>'
+        + '</div></div>'
+        + '<div style="font-size:12px;color:var(--text2);margin-bottom:'+(isLast?'4':'12')+'px;padding-left:8px">'+detail2+'</div>';
+
+      rows += sectionHdr('SCORING COMPONENTS');
+
+      // DTI
+      const dtiStr = detail.dtiPct!=null ? Math.round(detail.dtiPct*100)+'%' : '—';
+      rows += scoreRow('Debt-to-Income Ratio', detail.dtiPts, 40,
+        'DTI: '+dtiStr+' (target: &lt;20%)', false);
+
+      // Surplus
+      const surpStr = detail.surplusRatio!=null ? Math.round(detail.surplusRatio*100)+'% of income' : '—';
+      rows += scoreRow('Surplus Ratio', detail.surplusPts, 30,
+        'Surplus: '+surpStr, false);
+
+      // Hi-interest debt
+      const hiStr = detail.hiDebt===0 ? 'None' : fmt(detail.hiDebt)+' at APR &gt;15%';
+      rows += scoreRow('High-Interest Debt', detail.hiDebtPts, 30, hiStr, true);
+
+      rows += sectionHdr('INDICATORS (not scored)');
+
+      // Emergency fund
+      const efIcon = detail.liquidMonths>=3?'✅':detail.liquidMonths>=1?'⚠️':'❌';
+      rows += indicatorRow('Emergency Fund',
+        detail.liquidMonths.toFixed(1)+' months', efIcon, 'target: 3–6 months', false);
+
+      // Savings rate
+      const srIcon = detail.savingsRate>=15?'✅':detail.savingsRate>=5?'⚠️':'❌';
+      rows += indicatorRow('Savings Rate',
+        detail.savingsRate.toFixed(1)+'%', srIcon, 'target: &gt;15%', false);
+
+      // Net worth
+      const nwIcon = detail.netWorth>0?'✅':detail.netWorth===0?'⚠️':'❌';
+      rows += indicatorRow('Net Worth',
+        fmt(detail.netWorth), nwIcon, '', true);
+
+      body.innerHTML = headline + rows;
       El.ui.openModal('modal-health-breakdown');
     },
     calcPayoff(debts, extra, method) {
