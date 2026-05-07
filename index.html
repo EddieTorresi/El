@@ -785,7 +785,7 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
 .food-log-item { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
 #confetti-canvas { position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;display:none; }
 .txn-swipe-wrap { position:relative;overflow:hidden;border-radius:var(--radius-sm);margin-bottom:2px; }
-.txn-swipe-inner { transition:transform 0.18s ease;background:var(--card);cursor:pointer; }
+.txn-swipe-inner { transition:transform 0.18s ease;background:var(--card);cursor:pointer;width:100%;box-sizing:border-box; }
 .txn-swipe-inner:active { opacity:0.85; }
 .txn-delete-reveal { position:absolute;right:0;top:0;bottom:0;width:80px;background:var(--red);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;border-radius:0 var(--radius-sm) var(--radius-sm) 0; }
 </style>
@@ -7065,40 +7065,41 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       return data;
     },
     _showXLSXPreview(parsed) {
-      const esc = s => El.ai.escapeHtml(String(s));
-      const summary = [
-        parsed.debts.length ? `${parsed.debts.length} debts` : null,
-        parsed.savings.length ? `${parsed.savings.length} savings/accounts` : null,
-        parsed.accounts.length ? `${parsed.accounts.length} vehicle assets` : null,
-        parsed.recurring.length ? `${parsed.recurring.length} recurring expenses` : null,
-        parsed.budget.categories.length ? `${parsed.budget.categories.length} budget categories` : null,
-        parsed.financialPlan.length ? `${parsed.financialPlan.length} plan items` : null,
-        parsed.events.length ? `${parsed.events.length} calendar events` : null,
-      ].filter(Boolean).join(', ');
-      const msg = `Spreadsheet parsed. Found:\n\n${summary}\n\nImport will update your financial data while keeping workouts, macros, transactions, and settings. Continue?`;
+      const lines = [
+        `Income: ${parsed.profile.income ? '$' + parsed.profile.income.toLocaleString() + '/mo' : '⚠️ not found'}`,
+        `Debts: ${parsed.debts.length ? parsed.debts.length + ' accounts' : '⚠️ none parsed'}`,
+        `Savings/investments: ${parsed.savings.length ? parsed.savings.length + ' accounts' : '⚠️ none parsed'}`,
+        `Vehicle assets: ${parsed.accounts.length ? parsed.accounts.length + ' vehicles' : '⚠️ none parsed'}`,
+        `Recurring expenses: ${parsed.recurring.length ? parsed.recurring.length + ' items' : '⚠️ none parsed'}`,
+        `Budget categories: ${parsed.budget.categories.length ? parsed.budget.categories.length + ' categories' : '⚠️ none parsed'}`,
+        `Financial plan: ${parsed.financialPlan.length ? parsed.financialPlan.length + ' items' : '⚠️ none parsed'}`,
+        `Calendar events: ${parsed.events.length ? parsed.events.length + ' events' : 'none'}`,
+      ].join('\n');
+      const msg = 'Spreadsheet parsed — verify before importing:\n\n' + lines + '\n\nThis will REPLACE all financial data. Workouts, macros, and history are preserved.\n\nContinue?';
       if (!confirm(msg)) return;
       const existing = El.state.load() || {};
-      // Smart merge: financial data from spreadsheet; personal/fitness data preserved
-      const merged = Object.assign({}, existing, {
+      // Always do a full clean replace of all financial data — never mix with existing
+      // to ensure the score is deterministic and matches the spreadsheet exactly.
+      const merged = {
         profile:    Object.assign({}, existing.profile || {}, parsed.profile || {}),
-        debts:      parsed.debts.length    ? parsed.debts    : (existing.debts    || []),
-        savings:    parsed.savings.length  ? parsed.savings  : (existing.savings  || []),
-        accounts:   parsed.accounts.length ? parsed.accounts : (existing.accounts || []),
-        recurring:  parsed.recurring.length? parsed.recurring: (existing.recurring|| []),
-        events:     parsed.events.length   ? parsed.events   : (existing.events   || []),
-        financialPlan: parsed.financialPlan.length ? parsed.financialPlan : (existing.financialPlan || []),
-        financialPlanNotes: parsed.financialPlanNotes || existing.financialPlanNotes || '',
+        debts:      parsed.debts,
+        savings:    parsed.savings,
+        accounts:   parsed.accounts,
+        recurring:  parsed.recurring,
+        events:     parsed.events,
+        financialPlan: parsed.financialPlan,
+        financialPlanNotes: parsed.financialPlanNotes || '',
         budget: {
           transactions: (existing.budget || {}).transactions || [],
-          categories: parsed.budget.categories.length ? parsed.budget.categories : ((existing.budget || {}).categories || []),
+          categories: parsed.budget.categories,
         },
         workouts:        existing.workouts        || { templates: [], log: [] },
         macros:          existing.macros          || { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] },
-        paidBills:       existing.paidBills       || {},
+        paidBills:       {},
         netWorthHistory: existing.netWorthHistory || [],
         aiHistory:       existing.aiHistory       || [],
         settings:        existing.settings        || { currency: 'USD', theme: 'dark' },
-      });
+      };
       if (existing.profile && existing.profile.name) merged.profile.name = existing.profile.name;
       localStorage.setItem('el_data', JSON.stringify(merged));
       El.ui.showToast('✅ Spreadsheet imported!', 'success', 3000);
