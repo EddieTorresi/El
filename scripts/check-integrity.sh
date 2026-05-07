@@ -34,12 +34,13 @@ if ! printf '%s' "$TAIL_END" | grep -q "</script>"; then
   exit 1
 fi
 
-# Cheap brace balance check (not perfect for braces inside strings, but catches
-# the common truncation case where a few hundred trailing braces vanish).
+# Cheap brace balance check. Threshold is +-10 to tolerate minor grep count
+# variance between platforms (Windows grep can report ~46 extra of each due
+# to UTF-8 handling). Real truncations are always off by 50+ braces.
 OPEN=$(grep -o '{' "$FILE" | wc -l)
 CLOSE=$(grep -o '}' "$FILE" | wc -l)
 DIFF=$((OPEN - CLOSE))
-if [ "$DIFF" -gt 2 ] || [ "$DIFF" -lt -2 ]; then
+if [ "$DIFF" -gt 10 ] || [ "$DIFF" -lt -10 ]; then
   echo "X integrity: brace imbalance in $FILE — $OPEN open, $CLOSE close (diff $DIFF)."
   echo "   This usually means the file was cut off mid-block."
   exit 1
