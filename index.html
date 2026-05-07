@@ -1763,6 +1763,8 @@ const El = {
       const scoreGrade = healthDetail.grade;  // '—' when null
       const totalDebt = d.debts.reduce((s,x)=>s+x.balance,0);
       const totalSavings = d.savings.reduce((s,x)=>s+x.current,0);
+      const totalVehicles = (d.accounts||[]).filter(a=>a.type==='asset').reduce((s,a)=>s+(a.balance||0),0);
+      const netWorthTotal = totalSavings + totalVehicles - totalDebt;
       const now = new Date();
       const monthTxns = d.budget.transactions.filter(t => t.date && t.date.startsWith(El.monthKey(now)));
       const spent = monthTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
@@ -1895,7 +1897,7 @@ const El = {
             <div style="flex:1">
               <div style="margin-bottom:10px">
                 <div class="sub-label">Net Worth</div>
-                <div style="font-size:22px;font-weight:800;color:${totalSavings-totalDebt>=0?'var(--teal)':'var(--red)'}">${El.fmt(totalSavings-totalDebt)}</div>
+                <div style="font-size:22px;font-weight:800;color:${netWorthTotal>=0?'var(--teal)':'var(--red)'}">${netWorthTotal<0?'-':''}${El.fmt(Math.abs(netWorthTotal))}</div>
                 ${(()=>{ const hist=(d.netWorthHistory||[]).slice(-30); if(hist.length<2) return ''; const vals=hist.map(h=>h.value); const mn=Math.min(...vals),mx=Math.max(...vals),rng=mx-mn||1; const pts=vals.map((v,i)=>((i/(vals.length-1))*120)+','+(28-((v-mn)/rng)*24)).join(' '); const trend=vals[vals.length-1]>=vals[0]; return '<svg width="120" height="28" style="margin-top:2px;display:block"><polyline points="'+pts+'" fill="none" stroke="'+(trend?'var(--teal)':'var(--red)')+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'; })()}
               </div>
               <div style="display:flex;gap:16px">
@@ -3875,6 +3877,7 @@ const El = {
       const income = El.getIncome(d);
       const totalDebt = (d.debts||[]).reduce((s,x)=>s+(x.balance||0),0);
       const totalSavings = (d.savings||[]).reduce((s,x)=>s+(x.current||0),0);
+      const totalVehicleAssets = (d.accounts||[]).filter(a=>a.type==='asset').reduce((s,a)=>s+(a.balance||0),0);
       const minPayments = (d.debts||[]).reduce((s,x)=>s+(x.minPayment||0),0);
       const monthStr = El.monthKey(new Date());
       const monthTxns = ((d.budget && d.budget.transactions) || [])
@@ -3919,15 +3922,16 @@ const El = {
       breakdown.push({ key:'dti', label:'Debt-to-Income', weight:25, score:dtiScore, value:dtiValue, hint:dtiHint });
 
       // 3. Net-worth health (20%)
-      const netWorth = totalSavings - totalDebt;
+      const netWorth = totalSavings + totalVehicleAssets - totalDebt;
       let nwScore, nwHint;
-      if (totalDebt === 0 && totalSavings > 0) { nwScore = 100; nwHint = 'Debt-free'; }
+      const totalAssets = totalSavings + totalVehicleAssets;
+      if (totalDebt === 0 && totalAssets > 0) { nwScore = 100; nwHint = 'Debt-free'; }
       else if (totalDebt === 0) { nwScore = 70; nwHint = 'No debt — start saving'; }
-      else if (totalSavings >= totalDebt * 2) { nwScore = 95; nwHint = 'Savings 2x debt'; }
-      else if (totalSavings >= totalDebt) { nwScore = 80; nwHint = 'Savings cover debt'; }
-      else if (totalSavings >= totalDebt * 0.5) { nwScore = 55; nwHint = 'Halfway covered'; }
-      else if (totalSavings > 0) { nwScore = 30; nwHint = 'Debt outweighs savings'; }
-      else if (totalDebt > 0) { nwScore = 10; nwHint = 'Debt with no savings buffer'; }
+      else if (totalAssets >= totalDebt * 2) { nwScore = 95; nwHint = 'Assets 2x debt'; }
+      else if (totalAssets >= totalDebt) { nwScore = 80; nwHint = 'Assets cover debt'; }
+      else if (totalAssets >= totalDebt * 0.5) { nwScore = 55; nwHint = 'Halfway covered'; }
+      else if (totalAssets > 0) { nwScore = 30; nwHint = 'Debt outweighs assets'; }
+      else if (totalDebt > 0) { nwScore = 10; nwHint = 'Debt with no assets buffer'; }
       else { nwScore = 50; nwHint = 'Building'; }
       breakdown.push({ key:'networth', label:'Net Worth', weight:20, score:nwScore, value:El.fmt(netWorth), hint:nwHint });
 
@@ -6981,11 +6985,15 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
           // Find or create budget category
           const catKey = catName.toLowerCase();
           if (!catMap[catKey]) {
-            catMap[catKey] = { id: uid(), name: catName, allocated: 0, color: catColors[catIdx++ % catColors.length] };
+            // Pick a default icon based on category name
+            const iconMap = { hous:'🏠', rent:'🏠', insur:'🛡️', auto:'🚗', car:'🚗', transport:'🚗', fuel:'⛽', gas:'⛽', food:'🛒', grocer:'🛒', util:'⚡', phone:'📱', cell:'📱', internet:'🌐', sub:'📺', stream:'📺', entertain:'🎬', health:'💊', medical:'🏥', gym:'💪', fitness:'💪', pet:'🐾', dog:'🐾', storage:'📦', hobb:'🎯', misc:'📌', personal:'👤', travel:'✈️' };
+            const catIcon = Object.entries(iconMap).find(([k]) => catKey.includes(k))?.[1] || '📌';
+            catMap[catKey] = { id: uid(), name: catName, allocated: 0, icon: catIcon, color: catColors[catIdx++ % catColors.length] };
             data.budget.categories.push(catMap[catKey]);
           }
           catMap[catKey].allocated = Math.round((catMap[catKey].allocated + amount) * 100) / 100;
-          data.recurring.push({ id: uid(), name: expName, amount, category: catMap[catKey].id, frequency: 'monthly', type: 'expense', nextDate: '' });
+          // App renders r.description for recurring items (not r.name)
+          data.recurring.push({ id: uid(), description: expName, amount, category: catMap[catKey].id, frequency: 'monthly', type: 'expense', nextDate: '' });
         });
       }
 
@@ -7067,11 +7075,30 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         parsed.financialPlan.length ? `${parsed.financialPlan.length} plan items` : null,
         parsed.events.length ? `${parsed.events.length} calendar events` : null,
       ].filter(Boolean).join(', ');
-      const msg = `Spreadsheet parsed. Found:\n\n${summary}\n\nImport this data? (This will replace all current data)`;
+      const msg = `Spreadsheet parsed. Found:\n\n${summary}\n\nImport will update your financial data while keeping workouts, macros, transactions, and settings. Continue?`;
       if (!confirm(msg)) return;
       const existing = El.state.load() || {};
-      const merged = Object.assign({}, existing, parsed);
-      // Preserve profile name if already set
+      // Smart merge: financial data from spreadsheet; personal/fitness data preserved
+      const merged = Object.assign({}, existing, {
+        profile:    Object.assign({}, existing.profile || {}, parsed.profile || {}),
+        debts:      parsed.debts.length    ? parsed.debts    : (existing.debts    || []),
+        savings:    parsed.savings.length  ? parsed.savings  : (existing.savings  || []),
+        accounts:   parsed.accounts.length ? parsed.accounts : (existing.accounts || []),
+        recurring:  parsed.recurring.length? parsed.recurring: (existing.recurring|| []),
+        events:     parsed.events.length   ? parsed.events   : (existing.events   || []),
+        financialPlan: parsed.financialPlan.length ? parsed.financialPlan : (existing.financialPlan || []),
+        financialPlanNotes: parsed.financialPlanNotes || existing.financialPlanNotes || '',
+        budget: {
+          transactions: (existing.budget || {}).transactions || [],
+          categories: parsed.budget.categories.length ? parsed.budget.categories : ((existing.budget || {}).categories || []),
+        },
+        workouts:        existing.workouts        || { templates: [], log: [] },
+        macros:          existing.macros          || { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] },
+        paidBills:       existing.paidBills       || {},
+        netWorthHistory: existing.netWorthHistory || [],
+        aiHistory:       existing.aiHistory       || [],
+        settings:        existing.settings        || { currency: 'USD', theme: 'dark' },
+      });
       if (existing.profile && existing.profile.name) merged.profile.name = existing.profile.name;
       localStorage.setItem('el_data', JSON.stringify(merged));
       El.ui.showToast('✅ Spreadsheet imported!', 'success', 3000);
