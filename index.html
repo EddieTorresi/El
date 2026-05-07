@@ -1341,6 +1341,43 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
   </div>
 </div>
 
+<div class="modal-overlay" id="modal-edit-savings" onclick="if(event.target===this)El.ui.closeModal('modal-edit-savings')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Edit Savings Goal</div>
+    <input type="hidden" id="edit-sav-id">
+    <div class="form-group">
+      <label class="form-label">Goal Name</label>
+      <input class="form-input" id="edit-sav-name" placeholder="e.g. Emergency Fund">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Current Amount</label>
+        <input class="form-input" id="edit-sav-current" placeholder="0.00" type="number" inputmode="decimal">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Target Amount</label>
+        <input class="form-input" id="edit-sav-target" placeholder="0.00" type="number" inputmode="decimal">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Monthly Contribution</label>
+        <input class="form-input" id="edit-sav-monthly" placeholder="0.00" type="number" inputmode="decimal">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Interest Rate (%)</label>
+        <input class="form-input" id="edit-sav-rate" placeholder="e.g. 4.5" type="number" inputmode="decimal">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="El.finance.saveEditSavings()" style="flex:1">Save</button>
+      <button class="btn btn-danger" onclick="El.finance.deleteEditSavings()">Delete</button>
+    </div>
+    <button class="btn btn-outline" onclick="El.ui.closeModal('modal-edit-savings')" style="margin-top:8px">Cancel</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-budget-cat" onclick="if(event.target===this)El.ui.closeModal('modal-budget-cat')">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -1426,6 +1463,8 @@ const El = {
         weightLog: [],
         paidBills: {},
         netWorthHistory: [],
+        financialPlan: [],
+        financialPlanNotes: '',
         settings: { gcal_client_id: '', gcal_api_key: '', gcal_connected: false, gcalToken: '', aiProvider: 'builtin', aiApiKey: '', theme: 'dark' }
       };
     },
@@ -1458,6 +1497,8 @@ const El = {
       out.weightLog = Array.isArray(out.weightLog) ? out.weightLog : [];
       out.paidBills = isObj(out.paidBills) ? out.paidBills : {};
       out.netWorthHistory = Array.isArray(out.netWorthHistory) ? out.netWorthHistory : [];
+      out.financialPlan = Array.isArray(out.financialPlan) ? out.financialPlan : [];
+      if (typeof out.financialPlanNotes !== 'string') out.financialPlanNotes = '';
       out.settings = merge(base.settings, out.settings || {});
 
       // v4 migration: flip pre-v4 model picks to 'auto' so existing users see
@@ -2039,6 +2080,7 @@ const El = {
           <div class="tab" onclick="El.render.financeTab('debts')">Debts</div>
           <div class="tab" onclick="El.render.financeTab('savings')">Savings</div>
           <div class="tab" onclick="El.render.financeTab('whatif')">What If?</div>
+          <div class="tab" onclick="El.render.financeTab('plan')">Plan</div>
         </div>
         <div id="finance-content"></div>
       `;
@@ -2047,7 +2089,7 @@ const El = {
 
     financeTab(tab) {
       document.querySelectorAll('#finance-tabs .tab').forEach((t,i)=>{
-        t.classList.toggle('active', ['budget','debts','savings','whatif'][i]===tab);
+        t.classList.toggle('active', ['budget','debts','savings','whatif','plan'][i]===tab);
       });
       const d = El.state.get();
       const el = document.getElementById('finance-content');
@@ -2248,7 +2290,7 @@ const El = {
                 <div><div style="font-size:17px;font-weight:700">${s.name}${done?' 🎉':''}</div><div style="font-size:12px;color:var(--text2);margin-top:2px">${El.fmt(s.current)} of ${El.fmt(s.target)}</div></div>
                 <div style="display:flex;gap:6px;align-items:center">
                   <button onclick="El.finance.depositToGoal('${s.id}')" style="background:var(--teal-glow);border:1px solid var(--teal);color:var(--teal);border-radius:var(--radius-sm);padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap">+ Deposit</button>
-                  <button onclick="El.finance.removeSavings('${s.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px">×</button>
+                  <button onclick="El.finance.openEditSavings('${s.id}')" style="background:var(--bg3);border:none;color:var(--text2);cursor:pointer;font-size:13px;padding:4px 10px;border-radius:8px">✏️</button>
                 </div>
               </div>
               <div style="margin:12px 0">
@@ -2554,6 +2596,56 @@ const El = {
           </div>
         `;
         setTimeout(()=>{ El.ui.updateNewDebt(); El.ui.updateInvestVsDebt(); El.ui.updateGoalPlanner(); El.ui.updateBuyVsLoan(); El.ui.updateJobLoss(); El.ui.updateEmergencyImpact(); El.ui.updateOkToBuy(); El.ui.updateLifeGoal(); El.ui.renderDebtVsInvestNarrative(); }, 50);
+
+      } else if (tab === 'plan') {
+        const plan = d.financialPlan || [];
+        const groups = [
+          { key: '30d',  label: '📅 Next 30 Days',     color: 'var(--red)' },
+          { key: '6mo',  label: '📆 Next 6 Months',    color: 'var(--orange)' },
+          { key: '24mo', label: '🗓 Next 12–24 Months', color: 'var(--primary)' },
+        ];
+        const statusColors = { not_started: 'var(--text3)', in_progress: 'var(--orange)', done: 'var(--teal)' };
+        const statusLabels = { not_started: 'Not Started', in_progress: 'In Progress', done: '✓ Done' };
+        const doneCounts = {};
+        groups.forEach(g => {
+          const items = plan.filter(p => p.timeframe === g.key);
+          doneCounts[g.key] = items.filter(p => p.status === 'done').length + '/' + items.length;
+        });
+        el.innerHTML = `
+          <div class="card fade-in">
+            <div class="card-header">
+              <div class="card-title">💼 Financial Plan</div>
+              <button class="card-action" onclick="El.finance.openAddPlanItem()">+ Add</button>
+            </div>
+            <div style="font-size:13px;color:var(--text2);margin-bottom:4px">Tap a status badge to cycle it. Ask El AI to evaluate your progress.</div>
+          </div>
+          ${groups.map(g => {
+            const items = plan.filter(p => p.timeframe === g.key);
+            return `
+            <div class="card fade-in" style="margin-top:4px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div style="font-weight:700;font-size:15px">${g.label}</div>
+                <div style="font-size:12px;color:${g.color};font-weight:600">${doneCounts[g.key]} done</div>
+              </div>
+              ${items.length ? items.map(item => `
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--glass-border)">
+                  <div style="flex:1;padding-right:10px">
+                    <div style="font-size:14px;color:${item.status==='done'?'var(--text3)':'var(--text)'};${item.status==='done'?'text-decoration:line-through':''}">${El.ai.escapeHtml(item.text)}</div>
+                    ${item.note ? `<div style="font-size:12px;color:var(--text3);margin-top:3px">${El.ai.escapeHtml(item.note)}</div>` : ''}
+                  </div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+                    <button onclick="El.finance.cyclePlanStatus('${item.id}')" style="background:var(--bg3);border:none;border-radius:20px;padding:4px 10px;font-size:11px;color:${statusColors[item.status]||'var(--text3)'};cursor:pointer;white-space:nowrap;font-weight:600">${statusLabels[item.status]||'Not Started'}</button>
+                    <button onclick="El.finance.deletePlanItem('${item.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:0 2px">×</button>
+                  </div>
+                </div>`).join('') : `<div style="font-size:13px;color:var(--text3);padding:8px 0">No items yet — tap + Add to add one.</div>`}
+            </div>`;
+          }).join('')}
+          <div class="card fade-in" style="margin-top:4px">
+            <div class="card-header"><div class="card-title">📝 Notes</div></div>
+            <textarea id="plan-notes-area" class="form-input" rows="4" placeholder="Personal notes, decisions made, things to track..." style="resize:none;width:100%;box-sizing:border-box" oninput="El.finance.savePlanNotes(this.value)">${El.ai.escapeHtml(d.financialPlanNotes||'')}</textarea>
+          </div>
+          <button class="btn btn-outline" style="margin-top:8px;width:100%" onclick="El.ai.askAboutPlan()">🤖 Ask El to evaluate my plan</button>
+        `;
       }
     },
 
@@ -3006,6 +3098,8 @@ const El = {
           <div class="settings-title">Data</div>
           <button class="btn btn-outline" onclick="El.settings.exportData()" style="margin-bottom:10px">Export My Data (JSON)</button>
           ${d.settings && d.settings.lastExportAt ? `<div style="font-size:11px;color:var(--text3);margin-bottom:10px">Last export: ${d.settings.lastExportAt}</div>` : ''}
+          <button class="btn btn-outline" onclick="El.settings.importData()" style="margin-bottom:10px">Import Data (JSON)</button>
+          <input type="file" id="el-import-input" accept=".json,application/json" style="display:none" onchange="El.settings.handleImportFile(this)">
           <button class="btn btn-danger" onclick="El.settings.resetApp()">Reset All Data</button>
         </div>
         <div style="text-align:center;padding:24px 0;color:var(--text3);font-size:11px;line-height:1.6">
@@ -4531,6 +4625,85 @@ const El = {
       }
     },
 
+    // ── EDIT SAVINGS ──────────────────────────────────────────────────────────
+    openEditSavings(id) {
+      const d = El.state.get();
+      const s = d.savings.find(x => x.id === id);
+      if (!s) return;
+      document.getElementById('edit-sav-id').value = id;
+      document.getElementById('edit-sav-name').value = s.name;
+      document.getElementById('edit-sav-current').value = s.current;
+      document.getElementById('edit-sav-target').value = s.target;
+      document.getElementById('edit-sav-monthly').value = s.monthly;
+      document.getElementById('edit-sav-rate').value = s.rate;
+      El.ui.openModal('modal-edit-savings');
+    },
+    saveEditSavings() {
+      const id = document.getElementById('edit-sav-id').value;
+      const name = document.getElementById('edit-sav-name').value.trim();
+      if (!name) { alert('Enter a name'); return; }
+      const d = El.state.get();
+      const idx = d.savings.findIndex(x => x.id === id);
+      if (idx < 0) return;
+      d.savings[idx] = {
+        ...d.savings[idx],
+        name,
+        current: parseFloat(document.getElementById('edit-sav-current').value) || 0,
+        target:  parseFloat(document.getElementById('edit-sav-target').value)  || 0,
+        monthly: parseFloat(document.getElementById('edit-sav-monthly').value) || 0,
+        rate:    parseFloat(document.getElementById('edit-sav-rate').value)    || 0,
+      };
+      El.state.save();
+      El.ui.closeModal('modal-edit-savings');
+      El.render.financeTab('savings');
+    },
+    deleteEditSavings() {
+      const id = document.getElementById('edit-sav-id').value;
+      if (!confirm('Delete this savings goal?')) return;
+      const d = El.state.get();
+      d.savings = d.savings.filter(x => x.id !== id);
+      El.state.save();
+      El.ui.closeModal('modal-edit-savings');
+      El.render.financeTab('savings');
+    },
+
+    // ── FINANCIAL PLAN ────────────────────────────────────────────────────────
+    cyclePlanStatus(id) {
+      const d = El.state.get();
+      if (!d.financialPlan) d.financialPlan = [];
+      const item = d.financialPlan.find(x => x.id === id);
+      if (!item) return;
+      const cycle = { not_started: 'in_progress', in_progress: 'done', done: 'not_started' };
+      item.status = cycle[item.status] || 'in_progress';
+      El.state.save();
+      El.render.financeTab('plan');
+      El.haptic('light');
+    },
+    openAddPlanItem() {
+      const timeframe = prompt('Timeframe? Enter: 30d, 6mo, or 24mo', '30d');
+      if (!timeframe) return;
+      const tf = ['30d','6mo','24mo'].includes(timeframe.trim()) ? timeframe.trim() : '30d';
+      const text = prompt('Action item:');
+      if (!text || !text.trim()) return;
+      const d = El.state.get();
+      if (!d.financialPlan) d.financialPlan = [];
+      d.financialPlan.push({ id: El.uid(), timeframe: tf, status: 'not_started', text: text.trim() });
+      El.state.save();
+      El.render.financeTab('plan');
+    },
+    deletePlanItem(id) {
+      if (!confirm('Remove this item?')) return;
+      const d = El.state.get();
+      d.financialPlan = (d.financialPlan || []).filter(x => x.id !== id);
+      El.state.save();
+      El.render.financeTab('plan');
+    },
+    savePlanNotes(val) {
+      const d = El.state.get();
+      d.financialPlanNotes = val;
+      El.state.save();
+    },
+
     // ── EDIT DEBT ─────────────────────────────────────────────────────────────
     openEditDebt(id) {
       const d = El.state.get();
@@ -5280,6 +5453,26 @@ const El = {
         if (btn) { btn.disabled = false; btn.textContent = 'Ask El for personalized advice'; }
       }
     },
+    async askAboutPlan() {
+      if (!this.isConfigured()) {
+        El.ui.showToast('Set up an API key in Settings → El AI Provider first.');
+        return;
+      }
+      const d = El.state.get();
+      const plan = d.financialPlan || [];
+      if (!plan.length) { El.ui.showToast('No plan items yet — add some first.', 'info'); return; }
+      const provider = d.settings?.aiProvider;
+      const apiKey = (d.settings?.aiApiKey || '').trim();
+      const systemPrompt = this.buildSystemPrompt();
+      const question = `Please evaluate my financial plan. For each timeframe group (30 days, 6 months, 12-24 months), tell me: which items I should prioritize based on my actual numbers, whether my current status on each looks realistic, and if there's anything missing or out of order. Be direct and specific to my data. Use the structured Verdict / Why / Recommended next action response shape.`;
+      El.nav.go('ai');
+      setTimeout(() => {
+        const input = document.getElementById('ai-input');
+        if (input) { input.value = question; }
+        this.send();
+      }, 300);
+    },
+
     // True only when the user has selected Claude/OpenAI AND saved an API key.
     // The built-in keyword matcher is intentionally not enough — capture and
     // chat both need a real model to be useful.
@@ -5722,6 +5915,17 @@ Do not emit any [[EL_ACTION]] for these — they are advice questions, not captu
       const todayMacros = ((d.macros&&d.macros.log)||[]).filter(e=>e.date===today);
       const mt = todayMacros.reduce((a,e)=>{ a.cal+=e.calories||0;a.p+=e.protein||0;return a; },{cal:0,p:0});
 
+      // Financial plan summary for AI context
+      const planItems = (d.financialPlan || []);
+      const planLines = planItems.length ? (() => {
+        const groups = { '30d': '30-Day', '6mo': '6-Month', '24mo': '12-24 Month' };
+        return Object.entries(groups).map(([key, label]) => {
+          const items = planItems.filter(p => p.timeframe === key);
+          if (!items.length) return null;
+          return label + ': ' + items.map(p => `[${p.status.replace('_',' ')}] ${p.text}`).join(' | ');
+        }).filter(Boolean).join('\n');
+      })() : 'No plan items set.';
+
       return `USER: ${d.profile.name||'User'} · ${d.profile.currency||'USD'} · Income: ${El.fmt(income)}/mo · Risk: ${d.profile.riskTolerance||'moderate'}
 Today: ${today} (${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date().getDay()]})
 
@@ -5733,6 +5937,9 @@ FINANCES (capped):
 - Recent: ${recentTxns||'none'}
 - Budget categories: ${cats||'none set'}
 - Assumptions: ${d.assumptions?.returnRate||7}% return / ${d.assumptions?.inflationRate||3}% infl / ${d.assumptions?.taxRate||22}% tax
+
+FINANCIAL PLAN:
+${planLines}
 
 NEXT 14 DAYS:
 ${scheduleLines}
@@ -6634,6 +6841,29 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       El.state.save();
       if (El.nav.current === 'home' && El.render && El.render.home) El.render.home();
     },
+    importData() {
+      const input = document.getElementById('el-import-input');
+      if (input) { input.value = ''; input.click(); }
+    },
+    handleImportFile(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target.result);
+          if (!parsed || typeof parsed !== 'object') throw new Error('Invalid format');
+          // Basic sanity check — must have at least a profile or debts key
+          if (!parsed.profile && !parsed.debts && !parsed.budget) throw new Error('Does not look like El data');
+          if (!confirm('This will replace ALL your current data with the imported file. Continue?')) return;
+          localStorage.setItem('el_data', JSON.stringify(parsed));
+          location.reload();
+        } catch(err) {
+          El.ui.showToast('Import failed: ' + err.message, 'error', 4000);
+        }
+      };
+      reader.readAsText(file);
+    },
     resetApp() {
       if (!confirm('This will erase ALL your data. Are you sure?')) return;
       localStorage.removeItem('el_data');
@@ -7185,13 +7415,10 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => El.ui.showToast('✅ Google Calendar connected!'), 800);
       }
     } catch(e) {
-      console.error('El boot failed', e);
-      const home = document.getElementById('screen-home');
-      if (home) home.innerHTML = '<div class="page-header"><div class="page-title">El</div></div><div class="card"><div class="card-title">Safe Mode</div><div style="margin-top:10px;color:var(--text2);line-height:1.5">El loaded, but one module failed during startup. Clear site data or send the console error.</div></div>';
+      console.error('[El] boot error', e);
+      document.getElementById('app').style.display = 'flex';
     }
   }
-  // Prevent pull-to-refresh on mobile
-  document.body.addEventListener('touchmove', e=>{ if(e.touches.length>1) e.preventDefault(); }, { passive:false });
 });
 </script>
 
@@ -7200,12 +7427,6 @@ document.addEventListener('DOMContentLoaded', () => {
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
-  });
-}
-</script>
-</body>
-</html>
-=> {});
   });
 }
 </script>
