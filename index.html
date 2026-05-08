@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-05-08-fitness-import-v16 -->
+<!-- El fix build: 2026-05-08-fitness-import-v17 -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-05-08-fitness-import-v16';</script>
+<script>window.EL_BUILD = '2026-05-08-fitness-import-v17';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -7409,14 +7409,17 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         const rows = this._sheetToRows(wkSheet);
         const templateMap = {};
         data.workoutTemplates = [];
+        let lastWorkoutName = '';
         rows.forEach(r => {
-          const workoutName = str(r[0]);
+          const wn = str(r[0]);
           const exerciseName = str(r[1]);
-          if (!workoutName || !exerciseName) return;
-          if (/workout name|exercise|template|el import/i.test(workoutName)) return;
+          if (!exerciseName) return;
+          if (/workout name|exercise|template|el import/i.test(wn)) return;
+          const workoutName = wn || lastWorkoutName;
+          if (!workoutName) return;
+          if (wn) lastWorkoutName = wn;
           const sets   = Math.round(num(r[2])) || 3;
-          const repsRaw = str(r[3]);
-          const reps   = parseInt(repsRaw) || 10;
+          const reps   = parseInt(str(r[3])) || 10;
           const weightRaw = str(r[4]);
           const weight = /bw|bodyweight/i.test(weightRaw) ? 0 : (num(r[4]) || 0);
           if (!templateMap[workoutName]) {
