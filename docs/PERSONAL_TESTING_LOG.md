@@ -245,6 +245,29 @@ When no AI API key is configured in Settings, the Scan Receipt button dims to 45
 
 ---
 
+## Changes Logged For Build v14 (2026-05-08) — Fitness Import
+
+### Spreadsheet import for workout templates and macro goals
+
+El can now import workout templates and macro goal targets directly from a `.xlsx` file using the existing Finance tab → Import button. Two new sheets are parsed:
+
+- **"El Import - Workouts"** — rows of `Workout Name | Exercise | Sets | Reps | Weight (lbs) | Notes`. Each unique workout name becomes a saved template; weight `BW` or `0` means bodyweight.
+- **"El Import - Macros"** — rows of `Metric | Value`. Parses Calories, Protein, Carbs, Fat and sets them as your daily macro goals.
+
+Both work with Replace (clean slate) and Merge (adds new templates, updates goals). The import preview dialog now shows a "Workouts: N templates" and "Macro goals: X kcal / Yg protein" row when the file contains fitness data.
+
+**El_Fitness_Import.xlsx** — a combined spreadsheet has been saved to `C:\Users\Lap top\Downloads\El_Fitness_Import.xlsx` with:
+
+- **El Import - Workouts**: all 5 workout days (Mon Push, Tue Pull, Wed Legs, Thu Push, Fri Pull) with current working weights and progression notes
+- **El Import - Macros**: cutting phase targets (1800 kcal / 200g protein / 175g carbs / 45g fat)
+- **El Import - Foods**: common foods with macros per serving for reference
+- **Weekly Plan Overview**: visual 5-day split with daily macro summary
+- **Individual day sheets**: Mon+Thu Push, Tue+Fri Pull, Wed Legs with full progression notes
+
+To import: Finance tab → Import → pick `El_Fitness_Import.xlsx` → choose Replace or Merge.
+
+---
+
 ## Next Conversations
 
 ### Code structure

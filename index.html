@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-05-08-swipe-fix-v15 -->
+<!-- El fix build: 2026-05-08-fitness-import-v16 -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-05-08-swipe-fix-v15';</script>
+<script>window.EL_BUILD = '2026-05-08-fitness-import-v16';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -7403,6 +7403,47 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         });
       }
 
+      // ── WORKOUT TEMPLATES ──────────────────────────────────────────────────
+      const wkSheet = wb.Sheets['El Import - Workouts'] || wb.Sheets['Workouts'] || wb.Sheets['El Workouts'];
+      if (wkSheet) {
+        const rows = this._sheetToRows(wkSheet);
+        const templateMap = {};
+        data.workoutTemplates = [];
+        rows.forEach(r => {
+          const workoutName = str(r[0]);
+          const exerciseName = str(r[1]);
+          if (!workoutName || !exerciseName) return;
+          if (/workout name|exercise|template|el import/i.test(workoutName)) return;
+          const sets   = Math.round(num(r[2])) || 3;
+          const repsRaw = str(r[3]);
+          const reps   = parseInt(repsRaw) || 10;
+          const weightRaw = str(r[4]);
+          const weight = /bw|bodyweight/i.test(weightRaw) ? 0 : (num(r[4]) || 0);
+          if (!templateMap[workoutName]) {
+            const tpl = { id: uid(), name: workoutName, exercises: [] };
+            templateMap[workoutName] = tpl;
+            data.workoutTemplates.push(tpl);
+          }
+          templateMap[workoutName].exercises.push({ name: exerciseName, sets, reps, weight });
+        });
+      }
+
+      // ── MACRO GOALS ────────────────────────────────────────────────────────
+      const macroSheet = wb.Sheets['El Import - Macros'] || wb.Sheets['Macro Goals'] || wb.Sheets['Macros'];
+      if (macroSheet) {
+        const rows = this._sheetToRows(macroSheet);
+        data.macroGoals = {};
+        rows.forEach(r => {
+          const metric = str(r[0]).toLowerCase();
+          const val    = num(r[1]);
+          if (!metric || !val) return;
+          if (metric.includes('calor')) data.macroGoals.calories = Math.round(val);
+          if (metric.includes('protein')) data.macroGoals.protein = Math.round(val);
+          if (metric.includes('carb')) data.macroGoals.carbs = Math.round(val);
+          if (metric.includes('fat')) data.macroGoals.fat = Math.round(val);
+        });
+      }
+
       return data;
     },
     async _showXLSXPreview(parsed) {
@@ -7415,6 +7456,8 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         ['Categories', parsed.budget.categories.length ? parsed.budget.categories.length + ' categories' : '⚠️ none'],
         ['Plan items', parsed.financialPlan.length ? parsed.financialPlan.length + ' items' : 'none'],
         ['Events', parsed.events.length ? parsed.events.length + ' events' : 'none'],
+        ...(parsed.workoutTemplates && parsed.workoutTemplates.length ? [['Workouts', parsed.workoutTemplates.length + ' templates']] : []),
+        ...(parsed.macroGoals && parsed.macroGoals.calories ? [['Macro goals', parsed.macroGoals.calories + ' kcal / ' + (parsed.macroGoals.protein||0) + 'g protein']] : []),
       ];
       const tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px">' + rows.map(([k,v]) => `<tr><td style="padding:4px 0;color:var(--text2)">${k}</td><td style="padding:4px 0;text-align:right;font-weight:600;color:${v.startsWith('⚠️')?'var(--red)':'var(--text)'}">${v}</td></tr>`).join('') + '</table>';
       const choice = await El.ui.dialog({ title: 'Import Spreadsheet', body: tableHtml + '<div style="margin-top:10px;font-size:13px;color:var(--text2)">Replace clears existing data. Merge adds new items alongside existing ones.</div>', buttons: [{ label: 'Replace (clean slate)', value: 'R', primary: true }, { label: 'Merge (add to existing)', value: 'M', primary: false }, { label: 'Cancel', value: null }] });
@@ -7459,9 +7502,26 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
           },
         };
       }
-      // Always preserve non-financial data
-      merged.workouts        = existing.workouts        || { templates: [], log: [] };
-      merged.macros          = existing.macros          || { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] };
+      // Apply workout templates from import (merge by name, replace all in R mode)
+      const existingWorkouts = existing.workouts || { templates: [], log: [] };
+      if (parsed.workoutTemplates && parsed.workoutTemplates.length) {
+        let templates = mode === 'R' ? [] : (existingWorkouts.templates || []).slice();
+        const existingNames = new Set(templates.map(t => t.name.toLowerCase()));
+        parsed.workoutTemplates.forEach(t => {
+          if (!existingNames.has(t.name.toLowerCase())) templates.push(t);
+        });
+        merged.workouts = { templates, log: existingWorkouts.log || [] };
+      } else {
+        merged.workouts = existingWorkouts;
+      }
+      // Apply macro goals from import
+      const existingMacros = existing.macros || { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] };
+      if (parsed.macroGoals && Object.keys(parsed.macroGoals).length) {
+        const updatedGoals = Object.assign({}, existingMacros.goals || {}, parsed.macroGoals);
+        merged.macros = { goals: updatedGoals, log: existingMacros.log || [] };
+      } else {
+        merged.macros = existingMacros;
+      }
       merged.paidBills       = mode === 'R' ? {} : (existing.paidBills || {});
       merged.netWorthHistory = existing.netWorthHistory || [];
       merged.aiHistory       = existing.aiHistory       || [];
@@ -7617,7 +7677,6 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">'
         + '<div style="background:var(--bg3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--primary)">' + plan.macros.calories + '</div><div style="font-size:10px;color:var(--text2);margin-top:2px">Cal</div></div>'
         + '<div style="background:var(--bg3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--teal)">' + plan.macros.protein + 'g</div><div style="font-size:10px;color:var(--text2);margin-top:2px">Protein</div></div>'
-        + '<div style="background:var(--bg3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--orange)">' + plan.macros.carbs + 'g</div><div style="font-size:10px;color:var(--text2);margin-top:2px">Carbs</div></div>'
         + '<div style="background:var(--bg3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--red)">' + plan.macros.fat + 'g</div><div style="font-size:10px;color:var(--text2);margin-top:2px">Fat</div></div>'
         + '</div>'
         + '<div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">WORKOUTS (' + plan.workouts.length + ' templates)</div>'
