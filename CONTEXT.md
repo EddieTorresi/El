@@ -39,7 +39,7 @@ Finance is the long-term core. The goal is conversational decision clarity: not 
 - `El.nav` — tab navigation including `refreshAiVisibility()` which hides `#nav-ai` until an API key is configured.
 - `El.finance` — feature module. Includes `healthScore()` / `healthDetail()` (v11 3-component spreadsheet-aligned score) and `openHealthBreakdown()` (modal), `evaluateBuy({price, downPayment?, months?, apr?})` (local OK-to-Buy verdict), `processRecurring()`, `calcPayoff()`, receipt scanning, spreadsheet import helpers, and financial-plan helpers.
 - `El.schedule`, `El.fitness` — feature modules
-- `El.ui` — UI helpers including `showToast(msg, type, duration)`, `closeModal()`, `openModal()`, `catOptions()` (shared category-dropdown HTML), `updateOkToBuy()`, `toggleOkToBuyFinance()`.
+- `El.ui` — UI helpers including `showToast(msg, type, duration)` (wraps at 88vw, no overflow), `showUndoToast(msg, onUndo, duration)` (toast with tappable Undo button), `dialog({ title, body, input, buttons })` (async bottom-sheet modal — returns Promise, resolves to button value or input string; replaces `prompt`/`confirm`/`alert` for key flows), `_dialogCancel()`, `closeModal()`, `openModal()`, `catOptions()` (shared category-dropdown HTML), `updateOkToBuy()`, `toggleOkToBuyFinance()`.
 - `El.debug` — boolean flag (default false). Gates expected-path `console.warn` / `console.error` so production logs stay clean.
 - `window.EL_BUILD` — global build string set in `<head>`. Must match `BUILD` constant in `sw.js` and the `<!-- El fix build: ... -->` comment. Bump on every release so the SW cache self-invalidates and the visible "build" tag in Settings updates.
 
@@ -180,6 +180,11 @@ If any of these are missing, **do not commit**. Restore with `git checkout -- in
 | Receipt scanner | (v12) | Add Transaction modal can scan a receipt image via Claude Haiku or GPT-4o-mini vision and prefill the transaction form. |
 | Orphaned post-HTML code removed | `16a037f` | Removed duplicated JS after the first `</html>` so the document has exactly one body/html close. |
 | PWA service worker restored | (v13) | `sw.js` fetch handler is syntactically complete again and cache key was bumped to invalidate broken cached shells. |
+| Swipe-to-delete with undo | (v13) | Two-step reveal: swipe snaps to -80px, tap delete to confirm. `showUndoToast` offers 4.5s undo that restores the item. Single shared `document.touchstart` listener (not per-row) prevents listener accumulation on re-renders. |
+| Reusable `El.ui.dialog()` modal | (v13) | `#modal-dialog` bottom sheet replaces `prompt()`/`confirm()` for deposit, plan items, subscription actions, and spreadsheet import. `alert()` calls remain in form validation and settings — lower priority for future cleanup. |
+| Toast wrapping | (v13) | `showToast` now wraps long text (`white-space:normal`, `max-width:min(88vw,340px)`) instead of overflowing off-screen on iPhone. |
+| `.modal-footer` sticky CSS | (v13) | Modals can pin action buttons at bottom with `<div class="modal-footer">` — `position:sticky; bottom:0` with safe-area padding. |
+| Receipt scan button disabled state | (v13) | Button dims to 45% opacity and shows a tooltip when no AI key is configured in Settings. State checked each time the Add Transaction modal opens. |
 
 ---
 

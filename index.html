@@ -436,6 +436,7 @@ nav {
 }
 .modal-handle { touch-action: none; cursor: grab; width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 20px; }
 .modal-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+.modal-footer { position:sticky; bottom:0; background:rgba(13,13,24,0.97); padding:12px 0 env(safe-area-inset-bottom,0); margin:16px -20px -40px; padding-left:20px; padding-right:20px; border-top:1px solid var(--glass-border); display:flex; flex-direction:column; gap:10px; }
 
 /* TABS */
 .tabs {
@@ -1039,6 +1040,17 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
       <input class="form-input" id="account-institution" placeholder="e.g. Chase, Ally, Fidelity">
     </div>
     <button class="btn btn-primary" onclick="El.finance.saveAccount()">Save Account</button>
+  </div>
+</div>
+
+<!-- DIALOG MODAL (reusable confirm/input) -->
+<div class="modal-overlay" id="modal-dialog" onclick="if(event.target===this)El.ui._dialogCancel()">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="dialog-title"></div>
+    <div id="dialog-body" style="color:var(--text2);font-size:14px;line-height:1.6;margin-bottom:16px"></div>
+    <input class="form-input" id="dialog-input" style="display:none;margin-bottom:16px">
+    <div id="dialog-actions" style="display:flex;flex-direction:column;gap:10px"></div>
   </div>
 </div>
 
@@ -3142,8 +3154,13 @@ const El = {
         document.getElementById('txn-category').innerHTML = catOptions;
         const cb = document.getElementById('txn-recurring');
         if (cb) { cb.checked = false; document.getElementById('txn-freq-group').style.display='none'; }
-        // Always reset to expense mode so label/category are correct on every open
         this.setTxnType('expense');
+        const scanBtn = document.getElementById('btn-scan-receipt');
+        if (scanBtn) {
+          const hasKey = !!((El.state.get().settings || {}).aiApiKey || '').trim();
+          scanBtn.style.opacity = hasKey ? '1' : '0.45';
+          scanBtn.title = hasKey ? 'Scan a receipt with AI' : 'Add an AI key in Settings to enable receipt scanning';
+        }
       }
       if (id==='modal-edit-transaction') {
         document.getElementById('edit-txn-category').innerHTML = catOptions;
@@ -3851,7 +3868,7 @@ const El = {
         'color:'+color,'font-size:14px','font-weight:600',
         'padding:10px 20px','border-radius:24px',
         'box-shadow:var(--glass-glow,0 8px 32px rgba(0,0,0,0.4))',
-        'z-index:99999','pointer-events:none','white-space:nowrap',
+        'z-index:99999','pointer-events:none','white-space:normal','max-width:min(88vw,340px)','text-align:center',
         'opacity:0','transition:opacity 0.2s ease, transform 0.2s ease'
       ].join(';');
       toast.textContent = msg;
@@ -3865,7 +3882,80 @@ const El = {
         toast.style.transform = 'translateX(-50%) translateY(8px)';
         setTimeout(() => toast.remove(), 250);
       }, duration);
-    }
+    },
+
+    showUndoToast(msg, onUndo, duration = 4500) {
+      const toast = document.createElement('div');
+      toast.style.cssText = [
+        'position:fixed','bottom:calc(var(--nav-h,64px) + 24px)','left:50%',
+        'transform:translateX(-50%) translateY(12px)',
+        'background:var(--glass-bg-strong,rgba(30,30,40,0.92))',
+        'border:1px solid var(--glass-border,rgba(255,255,255,0.10))',
+        'backdrop-filter:var(--glass-blur,blur(20px))','-webkit-backdrop-filter:var(--glass-blur,blur(20px))',
+        'color:var(--text)','font-size:14px','font-weight:600',
+        'padding:10px 16px','border-radius:24px','display:flex','align-items:center','gap:12px',
+        'box-shadow:var(--glass-glow,0 8px 32px rgba(0,0,0,0.4))',
+        'z-index:99999','max-width:min(88vw,360px)',
+        'opacity:0','transition:opacity 0.2s ease, transform 0.2s ease'
+      ].join(';');
+      const label = document.createElement('span');
+      label.textContent = msg;
+      const btn = document.createElement('button');
+      btn.textContent = 'Undo';
+      btn.style.cssText = 'background:var(--primary-gradient);color:#fff;border:none;border-radius:12px;padding:4px 12px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0';
+      let dismissed = false;
+      const dismiss = () => {
+        if (dismissed) return; dismissed = true;
+        toast.style.opacity = '0'; toast.style.transform = 'translateX(-50%) translateY(8px)';
+        setTimeout(() => toast.remove(), 250);
+      };
+      btn.onclick = () => { dismiss(); if (onUndo) onUndo(); };
+      toast.appendChild(label); toast.appendChild(btn);
+      document.body.appendChild(toast);
+      requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateX(-50%) translateY(0)'; });
+      setTimeout(dismiss, duration);
+    },
+
+    _dialogResolve: null,
+    dialog({ title, body, input, buttons } = {}) {
+      return new Promise(resolve => {
+        this._dialogResolve = resolve;
+        document.getElementById('dialog-title').textContent = title || '';
+        const bodyEl = document.getElementById('dialog-body');
+        bodyEl.innerHTML = body || '';
+        const inp = document.getElementById('dialog-input');
+        if (input) {
+          inp.style.display = 'block';
+          inp.placeholder = input.placeholder || '';
+          inp.value = input.defaultValue || '';
+          inp.type = input.type || 'text';
+          inp.inputMode = input.inputMode || 'text';
+          setTimeout(() => inp.focus(), 300);
+        } else {
+          inp.style.display = 'none';
+          inp.value = '';
+        }
+        const actionsEl = document.getElementById('dialog-actions');
+        actionsEl.innerHTML = '';
+        const btns = buttons || [{ label: 'OK', value: 'ok', primary: true }, { label: 'Cancel', value: null }];
+        btns.forEach(b => {
+          const el = document.createElement('button');
+          el.textContent = b.label;
+          el.style.cssText = 'width:100%;padding:14px;border:none;border-radius:var(--radius-sm);font-size:16px;font-weight:600;cursor:pointer;' + (b.primary ? 'background:var(--primary-gradient);color:#fff' : 'background:var(--bg3);color:var(--text2)');
+          el.onclick = () => {
+            const val = input ? document.getElementById('dialog-input').value : b.value;
+            if (this._dialogResolve) { this._dialogResolve(b.value === null ? null : val); this._dialogResolve = null; }
+            El.ui.closeModal('modal-dialog');
+          };
+          actionsEl.appendChild(el);
+        });
+        El.ui.openModal('modal-dialog');
+      });
+    },
+    _dialogCancel() {
+      if (this._dialogResolve) { this._dialogResolve(null); this._dialogResolve = null; }
+      El.ui.closeModal('modal-dialog');
+    },
   },
 
   // ── FINANCE ────────────────────────────
@@ -4344,14 +4434,8 @@ const El = {
 
     // Tapping a detected subscription offers actions: schedule a "review" reminder
     // (so future-you re-evaluates) or convert to an explicit recurring expense.
-    openSubscriptionAction(key, amount) {
-      const choice = prompt(
-        'Subscription: ' + key + '\n\nWhat would you like to do?\n\n' +
-        '1 — Add a "review/cancel" reminder for the 1st of next month\n' +
-        '2 — Convert to a tracked recurring expense\n' +
-        'Anything else / cancel — close',
-        '1'
-      );
+    async openSubscriptionAction(key, amount) {
+      const choice = await El.ui.dialog({ title: key, body: '~' + El.fmt(amount) + '/mo auto-detected. What would you like to do?', buttons: [{ label: 'Add review reminder', value: '1', primary: true }, { label: 'Convert to recurring expense', value: '2', primary: false }, { label: 'Cancel', value: null }] });
       if (!choice) return;
       const d = El.state.get();
       if (choice.trim() === '1') {
@@ -4741,11 +4825,11 @@ const El = {
       El.state.save();
       El.render.financeTab('savings');
     },
-    depositToGoal(id) {
-      const amtStr = prompt('How much are you depositing?', '');
+    async depositToGoal(id) {
+      const amtStr = await El.ui.dialog({ title: 'Deposit to Goal', body: 'How much are you depositing?', input: { placeholder: '0.00', type: 'number', inputMode: 'decimal', defaultValue: '' }, buttons: [{ label: 'Deposit', value: 'ok', primary: true }, { label: 'Cancel', value: null }] });
       if (amtStr === null) return;
-      const amt = parseFloat(amtStr.replace(/[$,]/g, ''));
-      if (!amt || amt <= 0) { alert('Enter a valid amount'); return; }
+      const amt = parseFloat(String(amtStr).replace(/[$,]/g, ''));
+      if (!amt || amt <= 0) { El.ui.showToast('Enter a valid amount', 'error'); return; }
       const d = El.state.get();
       const goal = d.savings.find(x=>x.id===id);
       if (!goal) return;
@@ -4815,20 +4899,20 @@ const El = {
       El.render.financeTab('plan');
       El.haptic('light');
     },
-    openAddPlanItem() {
-      const timeframe = prompt('Timeframe? Enter: 30d, 90d, 6mo, 24mo, or longterm', '30d');
-      if (!timeframe) return;
-      const tf = ['30d','90d','6mo','24mo','longterm'].includes(timeframe.trim()) ? timeframe.trim() : '30d';
-      const text = prompt('Action item:');
+    async openAddPlanItem() {
+      const text = await El.ui.dialog({ title: 'Add Plan Item', body: 'What action do you want to track?', input: { placeholder: 'e.g. Pay off Discover card', defaultValue: '' }, buttons: [{ label: 'Next', value: 'ok', primary: true }, { label: 'Cancel', value: null }] });
       if (!text || !text.trim()) return;
+      const tf = await El.ui.dialog({ title: 'Timeframe', body: 'When do you want to complete this?', buttons: [{ label: '30 days', value: '30d', primary: false }, { label: '90 days', value: '90d', primary: false }, { label: '6 months', value: '6mo', primary: false }, { label: '2 years', value: '24mo', primary: false }, { label: 'Long term', value: 'longterm', primary: true }, { label: 'Cancel', value: null }] });
+      if (!tf) return;
       const d = El.state.get();
       if (!d.financialPlan) d.financialPlan = [];
       d.financialPlan.push({ id: El.uid(), timeframe: tf, status: 'not_started', text: text.trim() });
       El.state.save();
       El.render.financeTab('plan');
     },
-    deletePlanItem(id) {
-      if (!confirm('Remove this item?')) return;
+    async deletePlanItem(id) {
+      const ok = await El.ui.dialog({ title: 'Remove Item', body: 'Remove this plan item?', buttons: [{ label: 'Remove', value: 'ok', primary: true }, { label: 'Keep It', value: null }] });
+      if (!ok) return;
       const d = El.state.get();
       d.financialPlan = (d.financialPlan || []).filter(x => x.id !== id);
       El.state.save();
@@ -4992,14 +5076,37 @@ const El = {
       El.ui.showToast('All category budgets reset to $0', 'success');
       El.render.financeTab('budget');
     },
+    _currentRevealedWrap: null,
+    _swipeOutsideInit: false,
     initSwipeHandlers() {
+      // One shared document listener — installed once, never stacked.
+      if (!this._swipeOutsideInit) {
+        this._swipeOutsideInit = true;
+        document.addEventListener('touchstart', e => {
+          const cur = El.finance._currentRevealedWrap;
+          if (cur && !cur.wrap.contains(e.target)) {
+            cur.inner.style.transition = 'transform 0.18s ease';
+            cur.inner.style.transform = 'translateX(0)';
+            cur.revealed = false;
+            El.finance._currentRevealedWrap = null;
+          }
+        }, { passive: true });
+      }
       document.querySelectorAll('.txn-swipe-wrap').forEach(wrap => {
         const id = wrap.dataset.id;
         const type = wrap.dataset.type || 'txn';
         const inner = wrap.querySelector('.txn-swipe-inner');
         if (!inner || inner._swipeInit) return;
         inner._swipeInit = true;
+        const state = { revealed: false };
         let startX = 0, startY = 0, dx = 0, moved = false;
+        const resetSwipe = () => {
+          inner.style.transform = 'translateX(0)';
+          state.revealed = false;
+          if (El.finance._currentRevealedWrap && El.finance._currentRevealedWrap.wrap === wrap) {
+            El.finance._currentRevealedWrap = null;
+          }
+        };
         inner.addEventListener('touchstart', e => {
           startX = e.touches[0].clientX;
           startY = e.touches[0].clientY;
@@ -5014,18 +5121,47 @@ const El = {
           dx = Math.min(0, mx);
           inner.style.transform = 'translateX(' + dx + 'px)';
         }, { passive: true });
+        const reveal = wrap.querySelector('.txn-delete-reveal');
+        if (reveal) {
+          reveal.addEventListener('click', () => {
+            if (!state.revealed) return;
+            const d = El.state.get();
+            let removed = type === 'rec'
+              ? (d.recurring || []).find(r => r.id === id)
+              : ((d.budget && d.budget.transactions) || []).find(t => t.id === id);
+            inner.style.transition = 'transform 0.18s ease';
+            inner.style.transform = 'translateX(-100%)';
+            El.finance._currentRevealedWrap = null;
+            setTimeout(() => {
+              if (type === 'rec') El.finance.removeRecurring(id);
+              else El.finance.removeTransaction(id);
+              if (removed) {
+                El.ui.showUndoToast('Deleted', () => {
+                  const d2 = El.state.get();
+                  if (type === 'rec') { if (!d2.recurring) d2.recurring = []; d2.recurring.push(removed); }
+                  else { if (!d2.budget) d2.budget = {}; if (!d2.budget.transactions) d2.budget.transactions = []; d2.budget.transactions.push(removed); }
+                  El.state.save();
+                  if (El.nav.current === 'finance') El.render.financeTab(El.render._lastFinanceTab || 'budget');
+                });
+              }
+            }, 200);
+          });
+        }
         inner.addEventListener('touchend', () => {
           inner.style.transition = 'transform 0.18s ease';
           if (!moved || Math.abs(dx) < 10) {
-            inner.style.transform = 'translateX(0)';
-            if (type === 'rec') El.finance.openEditRecurring(id);
-            else El.finance.openEditTransaction(id);
-          } else if (dx < -75) {
-            inner.style.transform = 'translateX(-100%)';
-            if (type === 'rec') setTimeout(() => El.finance.removeRecurring(id), 200);
-            else setTimeout(() => El.finance.removeTransaction(id), 200);
+            if (!state.revealed) {
+              if (type === 'rec') El.finance.openEditRecurring(id);
+              else El.finance.openEditTransaction(id);
+            } else {
+              resetSwipe();
+            }
+          } else if (dx < -60) {
+            inner.style.transform = 'translateX(-80px)';
+            state.revealed = true;
+            El.finance._currentRevealedWrap = { wrap, inner, revealed: state };
           } else {
-            inner.style.transform = 'translateX(0)';
+            resetSwipe();
           }
           dx = 0; moved = false;
         });
@@ -7260,28 +7396,21 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
 
       return data;
     },
-    _showXLSXPreview(parsed) {
-      const lines = [
-        `Income: ${parsed.profile.income ? '$' + parsed.profile.income.toLocaleString() + '/mo' : '⚠️ not found'}`,
-        `Debts: ${parsed.debts.length ? parsed.debts.length + ' accounts' : '⚠️ none parsed'}`,
-        `Savings/investments: ${parsed.savings.length ? parsed.savings.length + ' accounts' : '⚠️ none parsed'}`,
-        `Vehicle assets: ${parsed.accounts.length ? parsed.accounts.length + ' vehicles' : '⚠️ none parsed'}`,
-        `Recurring expenses: ${parsed.recurring.length ? parsed.recurring.length + ' items' : '⚠️ none parsed'}`,
-        `Budget categories: ${parsed.budget.categories.length ? parsed.budget.categories.length + ' categories' : '⚠️ none parsed'}`,
-        `Financial plan: ${parsed.financialPlan.length ? parsed.financialPlan.length + ' items' : '⚠️ none parsed'}`,
-        `Calendar events: ${parsed.events.length ? parsed.events.length + ' events' : 'none'}`,
-      ].join('\n');
-      const choice = window.prompt(
-        'Spreadsheet parsed — verify before importing:\n\n' + lines +
-        '\n\nHow do you want to import?\n' +
-        '  Type R = Replace (clean slate — overwrites current financial data)\n' +
-        '  Type M = Merge (adds new items alongside existing data)\n' +
-        '  Cancel = abort',
-        'R'
-      );
+    async _showXLSXPreview(parsed) {
+      const rows = [
+        ['Income', parsed.profile.income ? '$' + parsed.profile.income.toLocaleString() + '/mo' : '⚠️ not found'],
+        ['Debts', parsed.debts.length ? parsed.debts.length + ' accounts' : '⚠️ none'],
+        ['Savings', parsed.savings.length ? parsed.savings.length + ' accounts' : '⚠️ none'],
+        ['Vehicles', parsed.accounts.length ? parsed.accounts.length + ' assets' : 'none'],
+        ['Recurring', parsed.recurring.length ? parsed.recurring.length + ' expenses' : '⚠️ none'],
+        ['Categories', parsed.budget.categories.length ? parsed.budget.categories.length + ' categories' : '⚠️ none'],
+        ['Plan items', parsed.financialPlan.length ? parsed.financialPlan.length + ' items' : 'none'],
+        ['Events', parsed.events.length ? parsed.events.length + ' events' : 'none'],
+      ];
+      const tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px">' + rows.map(([k,v]) => `<tr><td style="padding:4px 0;color:var(--text2)">${k}</td><td style="padding:4px 0;text-align:right;font-weight:600;color:${v.startsWith('⚠️')?'var(--red)':'var(--text)'}">${v}</td></tr>`).join('') + '</table>';
+      const choice = await El.ui.dialog({ title: 'Import Spreadsheet', body: tableHtml + '<div style="margin-top:10px;font-size:13px;color:var(--text2)">Replace clears existing data. Merge adds new items alongside existing ones.</div>', buttons: [{ label: 'Replace (clean slate)', value: 'R', primary: true }, { label: 'Merge (add to existing)', value: 'M', primary: false }, { label: 'Cancel', value: null }] });
       if (!choice) return;
       const mode = choice.trim().toUpperCase();
-      if (mode !== 'R' && mode !== 'M') { El.ui.showToast('Import cancelled.', 'info', 2000); return; }
       const existing = El.state.load() || {};
       let merged;
       if (mode === 'R') {

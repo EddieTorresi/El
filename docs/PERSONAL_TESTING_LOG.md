@@ -218,6 +218,33 @@ New "📷 Scan Receipt" button at the top of the Add Transaction modal. Tap it t
 
 ---
 
+## Changes Logged For Build v13 (2026-05-07) — UI & QOL Pass
+
+### Swipe to delete with undo
+Swipe behavior changed from "swipe past threshold = instant delete" to a two-step reveal pattern. Swiping left past 60px snaps the row to -80px, revealing the red delete button. Tapping the delete button triggers deletion and shows a 4.5-second **Undo** toast — tapping Undo restores the item in-place. Tapping anywhere outside the row collapses it back. No more accidental deletions.
+
+### Reusable dialog modal (replaces key native popups)
+Added a proper bottom-sheet modal (`#modal-dialog`) and utility `El.ui.dialog({ title, body, input, buttons })` — returns a Promise resolving to the chosen button value or input text. Converted the highest-friction flows:
+- Deposit to savings goal → number input modal
+- Add plan item → text input + timeframe picker (two-step modal flow)
+- Delete plan item → confirm modal
+- Subscription action → choice modal with labeled buttons
+- Spreadsheet import → data preview table + Replace / Merge buttons (no more R/M text prompt)
+
+Note: `alert()` and `confirm()` still exist in lower-traffic areas (form validation, debt/account/category removal, settings, fitness). These are candidates for a future pass.
+
+### Toast improvements
+- Long messages now wrap instead of overflowing off-screen (`white-space:normal`, `max-width:min(88vw,340px)`)
+- New `El.ui.showUndoToast(msg, onUndo)` variant — shows a toast with a tappable purple Undo button
+
+### Sticky modal footer CSS
+Added `.modal-footer` CSS class: `position:sticky; bottom:0` with safe-area padding and a top border. Any modal can wrap its action buttons in `<div class="modal-footer">` to pin them at the bottom of long modals.
+
+### Receipt scan button disabled state
+When no AI API key is configured in Settings, the Scan Receipt button dims to 45% opacity and shows a tooltip. State is evaluated each time the Add Transaction modal opens.
+
+---
+
 ## Next Conversations
 
 ### Code structure
