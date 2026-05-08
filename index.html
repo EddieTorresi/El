@@ -4140,9 +4140,10 @@ const El = {
     },
     scanReceipt() {
       const d = El.state.get() || {};
+      const provider = (d.settings?.aiProvider || 'builtin');
       const apiKey = (d.settings?.aiApiKey || '').trim();
       if (!apiKey) {
-        El.ui.toast('Add your Claude API key in Settings → AI to use receipt scanning');
+        El.ui.toast('Add your API key in Settings → AI to use receipt scanning');
         return;
       }
       document.getElementById('receipt-file-input').click();
@@ -4170,7 +4171,13 @@ const El = {
         const d = El.state.get() || {};
         const apiKey = (d.settings?.aiApiKey || '').trim();
 
-        const parsed = await El.ai.callClaudeVision(apiKey, base64, mediaType);
+        const provider = (d.settings?.aiProvider || 'builtin');
+        let parsed;
+        if (provider === 'openai') {
+          parsed = await El.ai.callOpenAIVision(apiKey, base64, mediaType);
+        } else {
+          parsed = await El.ai.callClaudeVision(apiKey, base64, mediaType);
+        }
 
         const amtEl = document.getElementById('txn-amount');
         const descEl = document.getElementById('txn-desc');
@@ -6162,6 +6169,34 @@ NUTRITION today: ${mt.cal}/${macroGoals.calories} cal · ${mt.p}/${macroGoals.pr
       if (!resp.ok) throw new Error('Vision API error ' + resp.status);
       const data = await resp.json();
       const text = data.content?.[0]?.text || '{}';
+      const clean = text.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+      return JSON.parse(clean);
+    },
+    async callOpenAIVision(apiKey, base64Image, mediaType) {
+      const d = El.state.get() || {};
+      const categories = (d.budget?.categories || []).map(c => `${c.id}:${c.name}`).join(', ');
+      const dataUrl = `data:${mediaType};base64,${base64Image}`;
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          max_tokens: 400,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } },
+              { type: 'text', text: `Parse this receipt. Return ONLY valid JSON (no markdown, no explanation):\n{"merchant":"store name","date":"YYYY-MM-DD","total":0.00,"category_id":"best match from: ${categories}","items":[{"name":"item","amount":0.00}]}\nUse today's date if not visible. Match category_id exactly to one of the provided IDs.` }
+            ]
+          }]
+        })
+      });
+      if (!resp.ok) throw new Error(`OpenAI vision error ${resp.status}`);
+      const data = await resp.json();
+      const text = data.choices?.[0]?.message?.content || '{}';
       const clean = text.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
       return JSON.parse(clean);
     },
