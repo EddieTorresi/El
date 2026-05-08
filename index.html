@@ -876,6 +876,8 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
   <div class="modal">
     <div class="modal-handle"></div>
     <div class="modal-title">Add Transaction</div>
+    <button type="button" onclick="El.finance.scanReceipt()" id="btn-scan-receipt" style="width:100%;padding:10px;margin-bottom:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">📷 Scan Receipt</button>
+    <input type="file" id="receipt-file-input" accept="image/*" capture="environment" style="display:none" onchange="El.finance._receiptFileChosen(this)">
     <div class="tabs" id="txn-type-tabs">
       <div class="tab active" onclick="El.ui.setTxnType('expense')">Expense</div>
       <div class="tab" onclick="El.ui.setTxnType('income')">Income</div>
@@ -4136,6 +4138,63 @@ const El = {
       document.getElementById('txn-amount').value='';
       document.getElementById('txn-desc').value='';
     },
+    scanReceipt() {
+      const d = El.state.get() || {};
+      const apiKey = (d.settings?.aiApiKey || '').trim();
+      if (!apiKey) {
+        El.ui.toast('Add your Claude API key in Settings → AI to use receipt scanning');
+        return;
+      }
+      document.getElementById('receipt-file-input').click();
+    },
+
+    async _receiptFileChosen(input) {
+      const file = input.files?.[0];
+      if (!file) return;
+      input.value = '';
+
+      const btn = document.getElementById('btn-scan-receipt');
+      const origText = btn.innerHTML;
+      btn.innerHTML = '⏳ Scanning…';
+      btn.disabled = true;
+
+      try {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = e => resolve(e.target.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        const mediaType = file.type || 'image/jpeg';
+        const d = El.state.get() || {};
+        const apiKey = (d.settings?.aiApiKey || '').trim();
+
+        const parsed = await El.ai.callClaudeVision(apiKey, base64, mediaType);
+
+        const amtEl = document.getElementById('txn-amount');
+        const descEl = document.getElementById('txn-desc');
+        const dateEl = document.getElementById('txn-date');
+        const catEl = document.getElementById('txn-category');
+
+        if (amtEl && parsed.total) amtEl.value = parsed.total.toFixed(2);
+        if (descEl && parsed.merchant) descEl.value = parsed.merchant;
+        if (dateEl && parsed.date) dateEl.value = parsed.date;
+        if (catEl && parsed.category_id) catEl.value = parsed.category_id;
+
+        if (parsed.items?.length > 1) {
+          El.ui.toast('📷 Parsed: ' + parsed.items.length + ' items — review and save');
+        } else {
+          El.ui.toast('📷 Receipt scanned — review and save');
+        }
+      } catch(err) {
+        console.error('Receipt scan failed:', err);
+        El.ui.toast('Could not parse receipt — fill in manually');
+      } finally {
+        btn.innerHTML = origText;
+        btn.disabled = false;
+      }
+    },
     openEditTransaction(id) {
       const d = El.state.get();
       const t = d.budget.transactions.find(x=>x.id===id);
@@ -6070,6 +6129,41 @@ NUTRITION today: ${mt.cal}/${macroGoals.calories} cal · ${mt.p}/${macroGoals.pr
       }
       const data = await res.json();
       return data.content[0].text;
+    },
+    async callClaudeVision(apiKey, base64Image, mediaType) {
+      const d = El.state.get() || {};
+      const categories = (d.budget?.categories || []).map(c => c.id + ':' + c.name).join(', ');
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 400,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: mediaType, data: base64Image }
+              },
+              {
+                type: 'text',
+                text: 'Parse this receipt. Return ONLY valid JSON (no markdown, no explanation):\n{"merchant":"store name","date":"YYYY-MM-DD","total":0.00,"category_id":"best match from: ' + categories + '","items":[{"name":"item","amount":0.00}]}\nUse today's date if not visible. Match category_id exactly to one of the provided IDs.'
+              }
+            ]
+          }]
+        })
+      });
+      if (!resp.ok) throw new Error('Vision API error ' + resp.status);
+      const data = await resp.json();
+      const text = data.content?.[0]?.text || '{}';
+      const clean = text.replace(/```[a-z]*\n?/g, '').replace(/```/g, '').trim();
+      return JSON.parse(clean);
     },
     pickOpenAiModel(userMessage) {
       const setting = El.state.get()?.settings?.aiOpenAiModel || 'auto';
