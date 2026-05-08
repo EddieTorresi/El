@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-04-29-bug-fixes-v11 api-key-banner-fit -->
+<!-- El fix build: 2026-05-07-bug-fixes-v13 -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-04-29-bug-fixes-v11';</script>
+<script>window.EL_BUILD = '2026-05-07-bug-fixes-v13';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -227,6 +227,8 @@ W.Chart=ElChart;
   --card2: #1a1a2e;
   --border: #2a2a45;
   --primary: #7c6aff;
+  --accent: #7c6aff;
+  --surface: #14142a;
   --primary-glow: rgba(124,106,255,0.25);
   --primary-gradient: linear-gradient(135deg, #7c6aff 0%, #a259ff 100%);
   --teal: #00d4aa;
@@ -252,7 +254,7 @@ W.Chart=ElChart;
 }
 body.light-mode {
   --bg: #f2f2f7; --bg2: #ffffff; --bg3: #e5e5ea; --card: #ffffff; --card2: #f9f9fb;
-  --border: #c6c6c8; --text: #1c1c1e; --text2: #636366; --text3: #aeaeb2;
+  --border: #c6c6c8; --surface: #e5e5ea; --accent: #7c6aff; --text: #1c1c1e; --text2: #636366; --text3: #aeaeb2;
   --shadow: 0 4px 24px rgba(0,0,0,0.10);
   --glass-bg: rgba(255,255,255,0.6);
   --glass-bg-strong: rgba(255,255,255,0.8);
@@ -4143,7 +4145,7 @@ const El = {
       const provider = (d.settings?.aiProvider || 'builtin');
       const apiKey = (d.settings?.aiApiKey || '').trim();
       if (!apiKey) {
-        El.ui.toast('Add your API key in Settings → AI to use receipt scanning');
+        El.ui.showToast('Add your API key in Settings → AI to use receipt scanning');
         return;
       }
       document.getElementById('receipt-file-input').click();
@@ -4190,13 +4192,13 @@ const El = {
         if (catEl && parsed.category_id) catEl.value = parsed.category_id;
 
         if (parsed.items?.length > 1) {
-          El.ui.toast('📷 Parsed: ' + parsed.items.length + ' items — review and save');
+          El.ui.showToast('📷 Parsed: ' + parsed.items.length + ' items — review and save');
         } else {
-          El.ui.toast('📷 Receipt scanned — review and save');
+          El.ui.showToast('📷 Receipt scanned — review and save');
         }
       } catch(err) {
         console.error('Receipt scan failed:', err);
-        El.ui.toast('Could not parse receipt — fill in manually');
+        El.ui.showToast('Could not parse receipt — fill in manually', 'error');
       } finally {
         btn.innerHTML = origText;
         btn.disabled = false;
@@ -5159,11 +5161,16 @@ const El = {
           ? `${date}T${String(parseInt(time.split(':')[0])+1).padStart(2,'0')}:${time.split(':')[1]}:00`
           : date;
         const isAllDay = !time;
+        const endDate = (() => {
+          const dt = new Date(date + 'T12:00:00');
+          dt.setDate(dt.getDate() + 1);
+          return El.dateKey(dt);
+        })();
         const body = {
           summary: title,
           description: notes || 'Added by El',
           ...(isAllDay
-            ? { start: { date }, end: { date } }
+            ? { start: { date }, end: { date: endDate } }
             : { start: { dateTime: startDt, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
                 end:   { dateTime: endDt,   timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } })
         };

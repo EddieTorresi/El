@@ -37,7 +37,7 @@ Finance is the long-term core. The goal is conversational decision clarity: not 
 - `El.ai` — the AI assistant: `init()`, `send()`, `respond()`, `saveHistory()`, `clear()`, `quickCapture()`, `isConfigured()` (true only when provider is claude/openai AND apiKey is set), `pickClaudeModel(text)` / `pickOpenAiModel(text)` (Auto routing), `analyzePurchaseFromForm()` (OK-to-Buy AI deep-dive), `_STATIC_PROMPT` + `buildDynamicContext()` (split for Anthropic prompt caching).
 - `El.render` — renders each screen: `home()`, `finance()`, `schedule()`, `fitness()`, `ai()`, `settings()`
 - `El.nav` — tab navigation including `refreshAiVisibility()` which hides `#nav-ai` until an API key is configured.
-- `El.finance` — feature module. Includes `healthScore()` / `healthDetail()` (5-component weighted score) and `openHealthBreakdown()` (modal), `evaluateBuy({price, downPayment?, months?, apr?})` (local OK-to-Buy verdict), `processRecurring()`, `calcPayoff()`.
+- `El.finance` — feature module. Includes `healthScore()` / `healthDetail()` (v11 3-component spreadsheet-aligned score) and `openHealthBreakdown()` (modal), `evaluateBuy({price, downPayment?, months?, apr?})` (local OK-to-Buy verdict), `processRecurring()`, `calcPayoff()`, receipt scanning, spreadsheet import helpers, and financial-plan helpers.
 - `El.schedule`, `El.fitness` — feature modules
 - `El.ui` — UI helpers including `showToast(msg, type, duration)`, `closeModal()`, `openModal()`, `catOptions()` (shared category-dropdown HTML), `updateOkToBuy()`, `toggleOkToBuyFinance()`.
 - `El.debug` — boolean flag (default false). Gates expected-path `console.warn` / `console.error` so production logs stay clean.
@@ -80,12 +80,13 @@ Conversation history is saved to `d.aiHistory` (last 40 messages) via `El.ai.sav
 
 ---
 
-## Current Features (as of 2026-04-29 build v9)
+## Current Features (as of 2026-05-07 build v13)
 
 - **Home screen:** Capture card with natural language input + voice/mic button, daily command center (today/tomorrow/next action), greeting with financial summary, **30-day backup-reminder banner** (v3) that disappears when `d.settings.lastExportAt` is fresh, **API-key-required banner** (v3) inside the capture card when `El.ai.isConfigured()` is false.
-- **Finance tab:** Transactions, recurring expenses and income, debts, savings goals, net worth tracking, budget categories.
-  - **What If?** subtab: New Debt Impact, Compound Interest, Goal Planner, Buy vs Loan, Job Loss Runway (auto-fills monthly expenses from transactions, v3), Emergency Impact, **🛒 OK to Buy?** card (v4 — instant local verdict + optional "Ask El for deeper analysis" button).
-  - **Financial Health** card on Home is tappable; opens a breakdown modal showing the 5 weighted components (v3 rewrite — emergency fund / DTI / net-worth / budget adherence / 30-day trend).
+- **Finance tab:** Transactions, recurring expenses and income, debts, savings goals, net worth tracking, budget categories, Financial Plan, JSON import/export, and XLSX import from the personal Financial Tracker spreadsheet (v10).
+  - **Add Transaction modal:** Photo receipt scanning (v12) uses the configured Claude/OpenAI key, sends the image to vision, and pre-fills merchant/date/total/category for review before save.
+  - **What If?** subtab: New Debt Impact, Compound Interest, Goal Planner, Buy vs Loan, Job Loss Runway (auto-fills monthly expenses from transactions, v3), Emergency Impact, **🛒 OK to Buy?** card (v4 — instant local verdict + optional "Ask El for deeper analysis" button), scenario comparison (v9), life-goal projection (v9), and debt-vs-invest narrative (v9).
+  - **Financial Health** card on Home is tappable; opens a breakdown modal showing the v11 3-component spreadsheet-aligned score: DTI (40), surplus ratio (30), and high-interest debt (30), plus non-scoring emergency-fund/savings-rate/net-worth indicators.
 - **Schedule tab:** Calendar view with recurring item dots, event management, Google Calendar OAuth integration.
 - **El AI tab:** Full chat assistant with voice input, history persistence, auto-action parsing. Tab is **hidden in the bottom nav until an API key is configured** (v3). Auto routing picks the cheapest model that fits the question (v4). System prompt uses Anthropic prompt caching (v4).
 - **Fitness tab:** Macro tracking (calories/protein/carbs/fat) and workout logging with templates.
@@ -94,7 +95,7 @@ Conversation history is saved to `d.aiHistory` (last 40 messages) via `El.ai.sav
 **PWA support:** `manifest.webmanifest` (icons trimmed to PNG-only with `purpose:"any"` after v3 — iOS ignored the SVG icons anyway), `sw.js` service worker with cache name tied to `BUILD` constant so every release self-invalidates (v3), icons (`el-icon.svg`, `el-icon-180.png`, `el-icon-192.png`, `el-icon-512.png`).
 
 **Integrity tooling (v3):**
-- `scripts/check-integrity.sh` — fails if `index.html` is under 5,500 lines, doesn't end with `</html>`, or has a brace imbalance > 2.
+- `scripts/check-integrity.sh` — fails if `index.html` is under 5,500 lines, doesn't end with `</html>`, or has a brace imbalance outside ±10. The wider brace tolerance is intentional for Windows/UTF-8 grep variance.
 - `scripts/pre-commit-hook.sh` — local pre-commit hook source; install once via `Copy-Item scripts\pre-commit-hook.sh .git\hooks\pre-commit -Force` (or `bash scripts/install-hooks.sh` on a system with bash on PATH).
 - `.github/workflows/integrity.yml` — runs the same check on every push/PR as a server-side safety net. The truncation problem can no longer reach the repo.
 
@@ -109,7 +110,7 @@ Conversation history is saved to `d.aiHistory` (last 40 messages) via `El.ai.sav
 - Manual checks if needed:
   ```bash
   tail -10 index.html    # must end with </html>
-  wc -l index.html       # must be 5500+ lines (v4 is ~6246)
+  wc -l index.html       # must be 5500+ lines (current app is ~7900)
   ```
 
 The file must end in this exact sequence:
@@ -145,7 +146,7 @@ If any of these are missing, **do not commit**. Restore with `git checkout -- in
 | Light mode glass variables | `bb99c23` | Overrides added to `body.light-mode` |
 | Reduced motion for ambient orbs | `bb99c23` | Wrapped in `@media (prefers-reduced-motion)` |
 | Post-capture feedback toasts | `bb99c23` | "Added to calendar ✓" etc. after AI action |
-| Financial Health score rewrite | `ec1093e` (v3) | 5-component weighted: emergency fund / DTI / net-worth / budget / 30-day trend. Tap card opens breakdown modal. Returns `null` (renders `—`) when no data exists. |
+| Financial Health score rewrite | `ec1093e` (v3), `fcadb9e` (v11) | v3 introduced the breakdown modal and no-data `—`; v11 replaced the old 5-component score with the spreadsheet-aligned 3-component formula: DTI / surplus ratio / high-interest debt. |
 | El AI tab gating | `ec1093e` (v3) | Bottom-nav AI button hidden until `El.ai.isConfigured()` true. Capture card shows "Add an API key" banner when not configured. |
 | Job Loss Runway auto-fill | `ec1093e` (v3) | Pre-fills monthly expenses from avg of last 3 months of expense transactions, falls back to recurring sum / allocations / 70% of income. |
 | Pre-commit + GitHub Action integrity check | `ec1093e` (v3) | `scripts/check-integrity.sh` enforces line count and `</html>` ending. |
@@ -174,6 +175,11 @@ If any of these are missing, **do not commit**. Restore with `git checkout -- in
 | Scenario comparison in OK to Buy | (v9) | "+ Compare" toggle reveals Option B column. Side-by-side verdicts + diff summary. |
 | Life-goal projection | (v9) | New What If card. Retire / house / custom goal types. FV math against starting savings + monthly contributions. |
 | Debt vs invest narrative | (v9) | New What If card. Local categorization (above / near / below return assumption) plus optional "Ask El for personalized advice" → `El.ai.narrateDebtVsInvest()`. |
+| Spreadsheet import + finance accuracy | (v10) | XLSX import maps Dashboard, Debts, Expenses, Net Worth, and Notes & Goals. Replace/Merge modes preserve non-financial data; vehicle assets count in net worth. |
+| Health score aligned to spreadsheet | (v11) | 3-component score now matches the Financial Tracker logic and separates emergency fund, savings rate, and net worth as non-scoring indicators. |
+| Receipt scanner | (v12) | Add Transaction modal can scan a receipt image via Claude Haiku or GPT-4o-mini vision and prefill the transaction form. |
+| Orphaned post-HTML code removed | `16a037f` | Removed duplicated JS after the first `</html>` so the document has exactly one body/html close. |
+| PWA service worker restored | (v13) | `sw.js` fetch handler is syntactically complete again and cache key was bumped to invalidate broken cached shells. |
 
 ---
 
@@ -208,7 +214,7 @@ If any of these are missing, **do not commit**. Restore with `git checkout -- in
 Done items pruned. Still on the list:
 
 - **Code structure:** Module splitting is future work — stabilize behavior first.
-- **Finance clarity engine:** OK-to-Buy was the first piece (v4). Remaining: scenario comparison, life-goal projections, retirement readiness.
+- **Finance clarity engine:** OK-to-Buy, scenario comparison, life-goal projections, and debt-vs-invest are shipped. Remaining ideas: retirement readiness, payoff-strategy comparisons, early-retirement runway, and richer purchase/financing planning.
 - **Inline-card result display:** Toasts cover the basics; an inline confirmation card could be richer UX for some captures.
 - **Maskable-safe icon:** The manifest currently lists PNG icons with `purpose:"any"`. A dedicated maskable PNG with an 80% safe zone would render cleaner on Android.
 
@@ -218,6 +224,8 @@ Already shipped (don't re-suggest):
 - `set_budget` chat action (v4) + tappable per-category budget editing + "Reset all" button (v5)
 - OK-to-Buy What If card with optional AI deep-dive (v4)
 - Pre-commit + GitHub Actions integrity check (v3)
-- Financial Health 5-component weighted score with breakdown modal (v3)
+- Financial Health breakdown modal (v3) and spreadsheet-aligned 3-component score (v11)
 - El AI tab gating + Home capture API-key banner (v3)
 - Job Loss Runway auto-fill from transaction history (v3)
+- XLSX Financial Tracker import with Replace/Merge modes (v10)
+- Receipt photo scanner for Add Transaction (v12)
