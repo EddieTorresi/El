@@ -789,7 +789,7 @@ input[type=range] { width:100%; accent-color: var(--primary); cursor:pointer; }
 .txn-swipe-wrap { position:relative;overflow:hidden;border-radius:var(--radius-sm);margin-bottom:2px; }
 .txn-swipe-inner { transition:transform 0.18s ease;background:var(--card);cursor:pointer;width:100%;box-sizing:border-box;position:relative;z-index:1; }
 .txn-swipe-inner:active { opacity:0.85; }
-.txn-delete-reveal { position:absolute;right:0;top:0;bottom:0;width:80px;background:var(--red);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;border-radius:0 var(--radius-sm) var(--radius-sm) 0; }
+.txn-delete-reveal { position:absolute;right:0;top:0;bottom:0;width:80px;background:#ff3b30;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;border-radius:0 var(--radius-sm) var(--radius-sm) 0;z-index:0; }
 </style>
 </head>
 <body>
@@ -7173,7 +7173,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         rows.forEach(r => {
           const catName = str(r[0]);
           const expName = str(r[1]);
-          if (!catName || !expName || /category|expense name|total|spending/i.test(catName)) return;
+          if (!catName || !expName || /^\d+(\.\d+)?$/.test(expName.trim()) || /category|expense name|total|spending/i.test(catName)) return;
           // Amount is in col C (index 2) if no provider, else col D (index 3)
           const amtC = num(r[2]), amtD = num(r[3]);
           const amount = amtD > 0 ? amtD : amtC;
