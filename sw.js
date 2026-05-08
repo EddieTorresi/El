@@ -1,7 +1,7 @@
 // Bump BUILD on every release to invalidate the SW cache automatically.
 // Keep this string in sync with EL_BUILD in index.html and the
 // "<!-- El fix build: ... -->" comment in index.html.
-const BUILD = '2026-05-08-swipe-fix-v14';
+const BUILD = '2026-05-08-swipe-fix-v15';
 const EL_CACHE = 'el-pages-' + BUILD;
 const APP_SHELL = [
   './',
