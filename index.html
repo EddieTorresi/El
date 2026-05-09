@@ -10,7 +10,7 @@
 <title>El — Everyday Life</title>
 <!-- El fix build: 2026-05-08-strava-v19 -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-05-08-strava-v19';</script>
+<script>window.EL_BUILD = '2026-05-08-strava-v20';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -3140,6 +3140,17 @@ const El = {
               <button class="btn btn-teal" onclick="El.strava.syncActivities()" style="margin-bottom:10px;width:100%">🔄 Sync Activities (Last 7 Days)</button>
               <div id="strava-sync-status" style="font-size:12px;color:var(--text2);margin-bottom:10px">${El.strava.lastSyncText()}</div>
               <div id="strava-activities-list">${El.strava.renderActivities()}</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 4px;border-top:1px solid var(--border);margin-top:10px">
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--text)">Auto-adjust macros from activities</div>
+                  <div style="font-size:11px;color:var(--text2);margin-top:2px;line-height:1.4">Adds burned calories to your daily goal when an activity syncs</div>
+                </div>
+                <label style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;margin-left:12px">
+                  <input type="checkbox" ${El.strava.adjustMacrosEnabled()?'checked':''} onchange="El.strava.setAdjustMacros(this.checked)" style="opacity:0;width:0;height:0;position:absolute">
+                  <span style="position:absolute;inset:0;background:${El.strava.adjustMacrosEnabled()?'var(--teal)':'var(--border)'};border-radius:12px;transition:background .2s;cursor:pointer" onclick="this.previousElementSibling.click()"></span>
+                  <span style="position:absolute;top:3px;left:${El.strava.adjustMacrosEnabled()?'23':'3'}px;width:18px;height:18px;background:#fff;border-radius:50%;transition:left .2s;pointer-events:none"></span>
+                </label>
+              </div>
               <button class="btn btn-danger" onclick="El.strava.disconnect()" style="margin-top:10px;width:100%">Disconnect Strava</button>
             ` : !El.strava.hasCredentials() ? `
               <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
@@ -8128,6 +8139,21 @@ El.strava = {
     return 'Last sync: ' + new Date(s.last_sync).toLocaleString();
   },
 
+  adjustMacrosEnabled() {
+    const s = this._load();
+    return s.adjustMacrosEnabled !== false; // default ON
+  },
+  setAdjustMacros(val) {
+    const s = this._load();
+    s.adjustMacrosEnabled = !!val;
+    this._save(s);
+    El.render.settings();
+    setTimeout(() => {
+      const el = document.getElementById('strava-setup-section');
+      if (el) el.style.display = 'block';
+    }, 50);
+  },
+
   saveCredentials() {
     const cid = (document.getElementById('strava-client-id')?.value || '').trim();
     const csec = (document.getElementById('strava-client-secret')?.value || '').trim();
@@ -8252,8 +8278,10 @@ El.strava = {
       s.last_sync   = new Date().toISOString();
       this._save(s);
 
-      // Check for high-burn activities and offer macro adjustment
-      acts.forEach(a => { if ((a.calories || 0) > 300) this._offerMacroAdjust(a); });
+      // Check for high-burn activities and offer macro adjustment (only if toggle is ON)
+      if (this.adjustMacrosEnabled()) {
+        acts.forEach(a => { if ((a.calories || 0) > 300) this._offerMacroAdjust(a); });
+      }
 
       El.render.settings();
       setTimeout(() => {
@@ -8319,7 +8347,7 @@ Add ${cal} calories to your macro goal for ${dateKey}?`)) {
           <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(a.name||'Activity')}</div>
           <div style="font-size:11px;color:var(--text2)">${date}${dist?' · '+dist:''}${cal?' · 🔥 '+cal:''}</div>
         </div>
-        ${(a.calories||0)>300?`<button onclick="El.strava.adjustMacrosById(${a.id||0})" style="background:var(--teal-glow);border:1px solid var(--teal);color:var(--teal);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;cursor:pointer;white-space:nowrap">+${a.calories} cal</button>`:''}
+        ${(a.calories||0)>300 && El.strava.adjustMacrosEnabled()?`<button onclick="El.strava.adjustMacrosById(${a.id||0})" style="background:var(--teal-glow);border:1px solid var(--teal);color:var(--teal);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;cursor:pointer;white-space:nowrap">+${a.calories} cal</button>`:''}
       </div>`;
     }).join('');
   },
