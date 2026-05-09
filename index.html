@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-05-08-fitness-import-v17 -->
+<!-- El fix build: 2026-05-08-fitness-import-v18 -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-05-08-fitness-import-v17';</script>
+<script>window.EL_BUILD = '2026-05-08-fitness-import-v18';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -7404,7 +7404,8 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       }
 
       // ── WORKOUT TEMPLATES ──────────────────────────────────────────────────
-      const wkSheet = wb.Sheets['El Import - Workouts'] || wb.Sheets['Workouts'] || wb.Sheets['El Workouts'];
+      const _findSheet = (wb, ...keys) => { for (const k of keys) { if (wb.Sheets[k]) return wb.Sheets[k]; const m = (wb.SheetNames||[]).find(n => n.toLowerCase().replace(/[^a-z]/g,'').includes(k.toLowerCase().replace(/[^a-z]/g,''))); if (m) return wb.Sheets[m]; } return null; };
+      const wkSheet = _findSheet(wb, 'El Import - Workouts', 'Workouts', 'El Workouts');
       if (wkSheet) {
         const rows = this._sheetToRows(wkSheet);
         const templateMap = {};
@@ -7432,7 +7433,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       }
 
       // ── MACRO GOALS ────────────────────────────────────────────────────────
-      const macroSheet = wb.Sheets['El Import - Macros'] || wb.Sheets['Macro Goals'] || wb.Sheets['Macros'];
+      const macroSheet = _findSheet(wb, 'El Import - Macros', 'Macro Goals', 'Macros');
       if (macroSheet) {
         const rows = this._sheetToRows(macroSheet);
         data.macroGoals = {};

@@ -1,0 +1,19 @@
+# Ensure consistent LF line endings across platforms
+* text=auto eol=lf
+
+# Force shell scripts to always have LF (CRLF breaks bash shebang on Linux)
+*.sh text eol=lf
+
+# Web files — always LF
+*.html text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Binary files — no conversion
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.svg binary
