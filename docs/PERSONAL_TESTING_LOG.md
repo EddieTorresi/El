@@ -350,6 +350,12 @@ This forces LF on all text files and explicitly enforces LF for shell scripts, s
 
 ---
 
+## ElNative Phase 2-3
+
+Full native screens built for all 6 tabs (Dashboard, Finance, Fitness, Nutrition, Web, Settings). AsyncStorage data layer implemented via `hooks/useElData.ts` (`el_data` key). Strava OAuth wired up via `hooks/useStrava.ts` using `expo-web-browser` and the deep link scheme `elnative://`. All screens use the `El` color palette from `constants/theme.ts`. Ready for Phase 4: EAS build + App Store submission (requires $99/yr Apple Developer account).
+
+---
+
 ## Next Conversations
 
 ### Code structure

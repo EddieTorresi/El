@@ -143,6 +143,83 @@ const ws = _findSheet(wb, 'El Import - Workouts', 'Import Workouts');
 
 ---
 
+## ElNative App (React Native / Expo)
+
+**Location:** `C:\Users\Lap top\Downloads\ElNative`
+
+**Framework:** Expo SDK 54, expo-router file-based routing, TypeScript.
+
+### Data Layer
+
+**File:** `hooks/useElData.ts`
+
+- AsyncStorage key: `el_data`
+- `ElDataProvider` wraps the root layout (`app/_layout.tsx`)
+- `useElData()` hook exposes: `addTransaction`, `deleteTransaction`, `addMacroLog`, `updateMacroLog`, `addWorkoutLog`, `saveSettings`, `clearAllData`
+
+### Strava Integration
+
+**File:** `hooks/useStrava.ts`
+
+- AsyncStorage key: `el_strava`
+- OAuth via `expo-web-browser` (no WebView — opens system browser)
+- Deep link scheme: `elnative://`
+- Token auto-refresh built into the hook
+
+### Screens
+
+All screens live under `app/(tabs)/`:
+
+| File | Screen |
+|---|---|
+| `index.tsx` | Dashboard |
+| `finance.tsx` | Finance |
+| `fitness.tsx` | Fitness |
+| `nutrition.tsx` | Nutrition |
+| `web.tsx` | Web (PWA embed) |
+| `settings.tsx` | Settings |
+
+### Color Palette
+
+**File:** `constants/theme.ts`
+
+Exports an `El` object with the following keys: `bg`, `card`, `border`, `textPrimary`, `textSecondary`, `green`, `blue`, `orange`, `red`. All components must use these constants — no raw hex strings anywhere in the codebase.
+
+### Tab Layout
+
+**File:** `app/(tabs)/_layout.tsx`
+
+6 tabs, uses `El` palette throughout, `HapticTab` for native haptic feedback on tab press.
+
+### Root Layout
+
+**File:** `app/_layout.tsx`
+
+Wraps the entire app in `ElDataProvider` so all screens have access to shared data state.
+
+### Running Locally
+
+```bash
+cd ElNative && npx expo start --lan
+```
+
+Requires Expo Go (SDK 54) on the phone, connected to the same WiFi network.
+
+### Phase 4 (Not Started)
+
+EAS build + App Store submission. Requires an Apple Developer account ($99/yr). No EAS configuration has been committed yet.
+
+### Codex Checklist for Any ElNative Change
+
+Before committing any change to the ElNative directory, verify:
+
+1. **TypeScript compiles** — no `any` types unless explicitly annotated with a comment explaining why.
+2. **AsyncStorage reads have try/catch** — every `AsyncStorage.getItem` / `setItem` call must be wrapped in a try/catch block.
+3. **No hardcoded secrets** — Strava `clientId` and `clientSecret` come from user input at runtime; they must never appear as literals in source files.
+4. **El color constants used everywhere** — no raw hex strings; all colors must reference the `El` object from `constants/theme.ts`.
+
+---
+
 ## CI / GitHub Actions
 
 **Script:** `scripts/check-integrity.sh`
