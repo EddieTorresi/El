@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-05-08-strava-v19 -->
+<!-- El fix build: 2026-05-08-strava-v20 -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
 <script>window.EL_BUILD = '2026-05-08-strava-v20';</script>
 <link rel="manifest" href="./manifest.webmanifest">
@@ -1558,6 +1558,11 @@ const El = {
     const c = s ? s.profile.currency : 'USD';
     return (sym[c]||'$') + Math.abs(amount).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
   },
+  escHtml(str) {
+    return String(str==null?'':str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  },
   dateKey(date) {
     const d = date || new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -2203,7 +2208,7 @@ const El = {
               const cat = d.budget.categories.find(c=>c.id===t.category);
               return `<div class="txn-swipe-wrap" data-id="${t.id}"><div class="txn-delete-reveal">🗑️</div><div class="txn-swipe-inner"><div class="list-item" style="gap:6px">
                 <div class="list-icon" style="background:${t.type==='income'?'var(--teal-glow)':'var(--red-glow)'}">${cat?cat.icon:t.type==='income'?'💰':'💸'}</div>
-                <div class="list-content"><div class="list-title">${t.description||'Transaction'}</div><div class="list-sub">${t.date} · ${cat?cat.name:'Uncategorized'}</div></div>
+                <div class="list-content"><div class="list-title">${El.escHtml(t.description||'Transaction')}</div><div class="list-sub">${t.date} · ${cat?El.escHtml(cat.name):'Uncategorized'}</div></div>
                 <div class="list-amount ${t.type==='income'?'pos':'neg'}">${t.type==='income'?'+':'-'}${El.fmt(t.amount)}</div>
               </div></div></div>`;
             }).join('') : `<div class="empty-state"><div class="empty-icon">📝</div><div class="empty-title">No transactions yet</div><div class="empty-sub">Add your first transaction to start tracking</div></div>`}
@@ -2218,7 +2223,7 @@ const El = {
               const daysUntil2 = r.nextDate ? Math.ceil((new Date(r.nextDate+'T12:00:00') - new Date()) / 86400000) : null;
               return '<div class="txn-swipe-wrap" data-id="' + r.id + '" data-type="rec"><div class="txn-delete-reveal">🗑️</div><div class="txn-swipe-inner"><div class="list-item" style="gap:6px">'
                 + '<div class="list-icon" style="background:var(--red-glow)">' + (cat2?cat2.icon:'🔄') + '</div>'
-                + '<div class="list-content"><div class="list-title">' + r.description + '</div>'
+                + '<div class="list-content"><div class="list-title">' + El.escHtml(r.description) + '</div>'
                 + '<div class="list-sub">' + r.frequency + ' · ' + El.fmt(monthly2) + '/mo' + (daysUntil2!==null?' · due in '+daysUntil2+' days':'') + '</div></div>'
                 + '<div style="display:flex;align-items:center;gap:4px">'
                 + '<div class="list-amount neg">' + El.fmt(r.amount) + '</div>'
@@ -7732,11 +7737,12 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       El.fitness._pendingPlan = plan;
 
       // Build review HTML
+      const esc = El.escHtml.bind(El);
       const content = '<div style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:14px">'
         + '<div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:4px">GOAL</div>'
-        + '<div style="font-size:14px;color:var(--text);line-height:1.6">' + plan.goal + '</div>'
+        + '<div style="font-size:14px;color:var(--text);line-height:1.6">' + esc(plan.goal) + '</div>'
         + '</div>'
-        + (plan.rationale ? '<div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px;padding:10px 12px;background:var(--bg3);border-radius:10px;border-left:3px solid var(--primary)">' + plan.rationale + '</div>' : '')
+        + (plan.rationale ? '<div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px;padding:10px 12px;background:var(--bg3);border-radius:10px;border-left:3px solid var(--primary)">' + esc(plan.rationale) + '</div>' : '')
         + '<div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">DAILY NUTRITION</div>'
         + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">'
         + '<div style="background:var(--bg3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:18px;font-weight:800;color:var(--primary)">' + plan.macros.calories + '</div><div style="font-size:10px;color:var(--text2);margin-top:2px">Cal</div></div>'
@@ -7746,8 +7752,8 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
         + '<div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">WORKOUTS (' + plan.workouts.length + ' templates)</div>'
         + plan.workouts.map(function(w) {
             return '<div style="padding:10px 12px;background:var(--bg3);border-radius:10px;margin-bottom:8px">'
-              + '<div style="font-weight:700;font-size:14px;margin-bottom:4px">🏋️ ' + w.name + '</div>'
-              + '<div style="font-size:12px;color:var(--text2)">' + w.exercises.map(function(e){ return e.name + ' ' + e.sets + 'x' + e.reps + (e.weight > 0 ? ' @ ' + e.weight + 'lbs' : ''); }).join(' · ') + '</div>'
+              + '<div style="font-weight:700;font-size:14px;margin-bottom:4px">🏋️ ' + esc(w.name) + '</div>'
+              + '<div style="font-size:12px;color:var(--text2)">' + w.exercises.map(function(e){ return esc(e.name) + ' ' + e.sets + 'x' + e.reps + (e.weight > 0 ? ' @ ' + e.weight + 'lbs' : ''); }).join(' · ') + '</div>'
               + '</div>';
           }).join('')
         + '<div style="font-size:12px;color:var(--text3);margin-top:4px">Accepting will set these as your macro goals and add workouts to your library.</div>';
