@@ -1,6 +1,6 @@
 # El Personal Testing Log
 
-Last updated: 2026-05-08 (build v20)
+Last updated: 2026-05-09 (build v20 + security + AI)
 
 ## Current Stage
 
@@ -15,6 +15,30 @@ El should give clarity to people who are unorganized, overwhelmed, or normally b
 3. Advise third.
 
 Finance stays a major pillar of the app. The long-term opportunity is not only budget tracking, but decision clarity: whether to buy, finance, save, invest, wait, or walk away. Example target question: "I make 150k, have 5k saved, and want an 80k car with 70k debt. How bad is that really, and what would happen if I invested instead?"
+
+## Security + AI Pass (2026-05-09)
+
+### XSS Sanitization (El PWA)
+- Added `El.escHtml()` utility — HTML-encodes `&`, `<`, `>`, `"`, `'`
+- Applied to transaction descriptions, recurring names, fitness plan content (lines ~2208, 2223, 7737+)
+- Fixed HTML comment mismatch: v19 → v20
+
+### PKCE for Strava OAuth
+- El PWA: `connect()` now generates PKCE pair via Web Crypto API, stores verifier in sessionStorage before redirect, includes `code_verifier` in token exchange
+- ElNative: `useOAuthProvider` generic hook handles PKCE for all providers; Strava, Fitbit, Google Fit, WHOOP, Polar, Garmin configs in `constants/fitnessProviders.ts`
+- Tokens now stored in `expo-secure-store` (device keychain) instead of AsyncStorage
+
+### Claude AI Integration
+- `hooks/useAI.ts`: Anthropic API client; key stored in SecureStore; models: Haiku (fast/cheap) + Sonnet (smart/analysis)
+- `services/elAI.ts`: `generateFitnessPlan()` uses real Strava/Garmin history; `getWeeklyInsights()` cross-domain (finance+fitness+nutrition); `categorizeTxn()` auto-category suggestion; `answerHealthQuery()` natural language Q&A
+- Dashboard: Weekly Insights card (tap Generate → 3 personalized observations from Claude)
+- Settings: Claude API key input with masked field + Test Connection button
+- El PWA: `El.ai` namespace with same four features
+
+### Multi-provider fitness OAuth infrastructure
+- `constants/fitnessProviders.ts`: Strava, Fitbit, Google Fit, WHOOP, Polar, Garmin configs
+- `hooks/useOAuthProvider.ts`: generic PKCE OAuth hook — add any new provider in one config object
+- `hooks/useStrava.ts`: refactored to ~80 lines, delegates to `useOAuthProvider`
 
 ## Changes Logged For This Pass
 
