@@ -8184,16 +8184,32 @@ El.strava = {
     }, 50);
   },
 
-  connect() {
+  // ── PKCE helpers (Web Crypto API) ──────────────────────────────────────────
+  async _pkceVerifier() {
+    const arr = new Uint8Array(32);
+    crypto.getRandomValues(arr);
+    return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  },
+  async _pkceChallenge(verifier) {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    return btoa(String.fromCharCode(...new Uint8Array(hash))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  },
+
+  async connect() {
     const s = this._load();
     if (!s.client_id) { alert('Save your Strava Client ID first.'); return; }
     const redirectUri = 'https://eddietorresi.github.io/El/';
+    const verifier = await this._pkceVerifier();
+    const challenge = await this._pkceChallenge(verifier);
+    sessionStorage.setItem('el_strava_pkce_verifier', verifier);
     const params = new URLSearchParams({
       client_id: s.client_id,
       redirect_uri: redirectUri,
       response_type: 'code',
       approval_prompt: 'auto',
-      scope: 'activity:read_all'
+      scope: 'activity:read_all',
+      code_challenge: challenge,
+      code_challenge_method: 'S256'
     });
     window.location.href = 'https://www.strava.com/oauth/authorize?' + params.toString();
   },
@@ -8204,16 +8220,20 @@ El.strava = {
       console.warn('[El.strava] No credentials for token exchange');
       return false;
     }
+    const verifier = sessionStorage.getItem('el_strava_pkce_verifier') || '';
+    sessionStorage.removeItem('el_strava_pkce_verifier');
     try {
+      const body = {
+        client_id: s.client_id,
+        client_secret: s.client_secret,
+        code,
+        grant_type: 'authorization_code',
+        ...(verifier ? { code_verifier: verifier } : {})
+      };
       const resp = await fetch('https://www.strava.com/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          client_id: s.client_id,
-          client_secret: s.client_secret,
-          code,
-          grant_type: 'authorization_code'
-        })
+        body: JSON.stringify(body)
       });
       if (!resp.ok) { console.warn('[El.strava] token exchange failed', resp.status); return false; }
       const tok = await resp.json();
@@ -8376,6 +8396,85 @@ Add ${cal} calories to your macro goal for ${dateKey}?`)) {
       if (el) el.style.display = 'block';
     }, 50);
     El.ui.showToast('Strava disconnected');
+  }
+};
+
+// ── AI ─────────────────────────────────────────────────────────────────────
+El.ai = {
+  AI_KEY: 'el_ai_key',
+  MODEL_FAST:  'claude-haiku-4-5-20251001',
+  MODEL_SMART: 'claude-sonnet-4-6',
+  API_URL:     'https://api.anthropic.com/v1/messages',
+
+  getKey()    { return localStorage.getItem(this.AI_KEY) || ''; },
+  saveKey(k)  { localStorage.setItem(this.AI_KEY, k.trim()); },
+  clearKey()  { localStorage.removeItem(this.AI_KEY); },
+  hasKey()    { return !!this.getKey(); },
+
+  async _call(messages, { model = 'smart', system, maxTokens = 1024 } = {}) {
+    const key = this.getKey();
+    if (!key) { El.ui.showToast('\u26a0 Add your Claude API key in Settings \u2192 AI.'); return null; }
+    const modelId = model === 'fast' ? this.MODEL_FAST : this.MODEL_SMART;
+    try {
+      const body = { model: modelId, max_tokens: maxTokens, messages };
+      if (system) body.system = system;
+      const res = await fetch(this.API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) { const e = await res.json().catch(()=>{}); throw new Error(e?.error?.message || 'API ' + res.status); }
+      const json = await res.json();
+      return json.content?.[0]?.text ?? '';
+    } catch(e) { console.error('[El.ai]', e); El.ui.showToast('\u26a0 AI error: ' + e.message); return null; }
+  },
+
+  async complete(prompt, opts) { return this._call([{ role: 'user', content: prompt }], opts); },
+
+  async suggestCategory(description) {
+    if (!description || !this.hasKey()) return null;
+    const cats = ['Food','Transport','Shopping','Bills','Entertainment','Health','Other'];
+    const result = await this.complete(
+      'Categorize this transaction: "' + description + '"\nCategories: ' + cats.join(', ') + '\nReply with ONLY the category name.',
+      { model: 'fast', maxTokens: 10 }
+    );
+    const t = (result||'').trim();
+    return cats.includes(t) ? t : null;
+  },
+
+  async generateFitnessPlan(goalText) {
+    const d = El.state.get(); if (!d) return null;
+    const acts = (d.strava?.activities||[]).slice(0,10).map(a=>a.type+' \u2014 '+(a.distance/1000).toFixed(1)+'km, '+Math.round(a.moving_time/60)+'min'+(a.calories?', '+a.calories+' cal':'')).join('\n')||'No recent activities.';
+    const mg = d.macros?.goals||{calories:2000,protein:150,carbs:200,fat:65};
+    const prompt = 'You are a certified personal trainer.\nGOAL: '+goalText+'\nMACROS: '+mg.calories+' cal, '+mg.protein+'g protein, '+mg.carbs+'g carbs, '+mg.fat+'g fat\nACTIVITIES:\n'+acts+'\n\nRespond ONLY with valid JSON: {"goal":"...","rationale":"...","macros":{"calories":0,"protein":0,"carbs":0,"fat":0},"workouts":[{"name":"...","exercises":[{"name":"...","sets":0,"reps":0,"weight":0}]}]}\nInclude 3-4 workouts.';
+    const raw = await this.complete(prompt, { model: 'smart', maxTokens: 1500 });
+    if (!raw) return null;
+    try { const m = raw.match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; } catch { return null; }
+  },
+
+  async weeklyInsights() {
+    const d = El.state.get(); if (!d) return null;
+    const wa = new Date(Date.now()-7*24*3600*1000).toISOString().slice(0,10);
+    const txns = (d.budget?.transactions||[]).filter(t=>t.date>=wa);
+    const spent = txns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+    const acts  = (d.strava?.activities||[]).filter(a=>(a.start_date_local||'').slice(0,10)>=wa);
+    const ml    = (d.macros?.log||[]).filter(m=>m.date>=wa);
+    const avgCal = ml.length ? Math.round(ml.reduce((s,m)=>s+m.calories,0)/ml.length) : null;
+    const prompt = 'Wellness coach reviewing this week.\nFINANCE: $'+spent.toFixed(0)+' spent.\nFITNESS: '+acts.length+' activities — '+(acts.map(a=>a.type+' '+(a.distance/1000).toFixed(1)+'km').join(', ')||'none')+'.\nNUTRITION: '+(avgCal?'Avg '+avgCal+' cal/day (goal '+(d.macros?.goals?.calories||2000)+')':'No logs')+'.\nGive 3 specific insights. JSON only: [{"type":"positive"|"warning"|"tip","title":"...","body":"..."}]';
+    const raw = await this.complete(prompt, { model: 'smart', maxTokens: 600 });
+    if (!raw) return null;
+    try { const m = raw.match(/\[[\s\S]*\]/); return m ? JSON.parse(m[0]) : null; } catch { return null; }
+  },
+
+  saveKeyFromInput() {
+    const k = (document.getElementById('ai-key-input')?.value||'').trim();
+    if (!k) { alert('Enter your API key.'); return; }
+    if (!k.startsWith('sk-ant-')) { alert('Key should start with sk-ant-'); return; }
+    this.saveKey(k); El.render.settings(); El.ui.showToast('\u2705 API key saved');
+  },
+  removeKey() {
+    if (!confirm('Remove Claude API key?')) return;
+    this.clearKey(); El.render.settings();
   }
 };
 
