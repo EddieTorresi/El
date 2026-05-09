@@ -8,9 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="El">
 <title>El — Everyday Life</title>
-<!-- El fix build: 2026-05-08-fitness-import-v18 -->
+<!-- El fix build: 2026-05-08-strava-v19 -->
 <!-- KEEP IN SYNC: BUILD constant in sw.js and window.EL_BUILD below must match this date stamp -->
-<script>window.EL_BUILD = '2026-05-08-fitness-import-v18';</script>
+<script>window.EL_BUILD = '2026-05-08-strava-v19';</script>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
@@ -3043,6 +3043,14 @@ const El = {
             </div>
             <div class="settings-arrow">›</div>
           </div>
+          <div class="settings-item" onclick="El.settings.showStrava()">
+            <div class="settings-icon" style="background:#fce9e3;font-size:22px">🏃</div>
+            <div class="settings-text">
+              <div class="settings-name">Strava</div>
+              <div class="settings-desc">${El.strava.isConnected()?'✅ Connected — '+El.strava.athleteName()+' · sync activities':'Connect to import workouts & calories'}</div>
+            </div>
+            <div class="settings-arrow">›</div>
+          </div>
         </div>
 
         <div class="settings-section fade-in">
@@ -3119,6 +3127,43 @@ const El = {
                 <span style="cursor:pointer;color:var(--primary);font-size:12px" onclick="El.settings.clearGcalClientId()">Change Client ID</span>
               </div>
               <button class="btn btn-teal" onclick="El.settings.startGcalOAuth()">Connect Google Calendar via OAuth</button>
+            `}
+          </div>
+        </div>
+
+        <div class="settings-section fade-in" id="strava-setup-section" style="display:none">
+          <div class="settings-title">Strava Integration</div>
+          <div class="card">
+            ${El.strava.isConnected() ? `
+              <div style="color:var(--teal);font-weight:600;margin-bottom:10px">✅ Connected as <strong>${El.strava.athleteName()}</strong></div>
+              <div style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5">El can sync your recent activities and suggest calorie adjustments on heavy workout days.</div>
+              <button class="btn btn-teal" onclick="El.strava.syncActivities()" style="margin-bottom:10px;width:100%">🔄 Sync Activities (Last 7 Days)</button>
+              <div id="strava-sync-status" style="font-size:12px;color:var(--text2);margin-bottom:10px">${El.strava.lastSyncText()}</div>
+              <div id="strava-activities-list">${El.strava.renderActivities()}</div>
+              <button class="btn btn-danger" onclick="El.strava.disconnect()" style="margin-top:10px;width:100%">Disconnect Strava</button>
+            ` : !El.strava.hasCredentials() ? `
+              <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
+                Connect Strava to automatically import run/ride data and adjust your daily calorie goals.<br><br>
+                1. Go to <a href="https://www.strava.com/settings/api" target="_blank" style="color:var(--primary)">strava.com/settings/api</a><br>
+                2. Create an app (Website URL: <code style="font-size:11px">https://eddietorresi.github.io/El/</code>)<br>
+                3. Set Authorization Callback Domain: <code style="font-size:11px">eddietorresi.github.io</code><br>
+                4. Paste your Client ID and Client Secret below
+              </div>
+              <div class="form-group">
+                <label class="form-label">Client ID</label>
+                <input class="form-input" id="strava-client-id" placeholder="e.g. 12345" type="number">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Client Secret</label>
+                <input class="form-input" id="strava-client-secret" placeholder="Strava client secret" type="password">
+              </div>
+              <button class="btn btn-teal" onclick="El.strava.saveCredentials()" style="width:100%">Save & Connect Strava</button>
+            ` : `
+              <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.5">
+                Credentials saved. Tap below to authorize El via Strava OAuth.<br>
+                <span style="cursor:pointer;color:var(--primary);font-size:12px" onclick="El.strava.clearCredentials()">Change credentials</span>
+              </div>
+              <button class="btn btn-teal" onclick="El.strava.connect()" style="width:100%">🏃 Connect Strava</button>
             `}
           </div>
         </div>
@@ -7176,6 +7221,10 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       // Legacy shim — now replaced by OAuth flow
       this.saveGcalClientId();
     },
+    showStrava() {
+      const el = document.getElementById('strava-setup-section');
+      if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    },
     exportData() {
       const d = El.state.get();
       const data = JSON.stringify(d, null, 2);
@@ -8048,11 +8097,288 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
     }
   }
 };
+
+// ── STRAVA ─────────────────────────────────
+El.strava = {
+  STORE_KEY: 'el_strava',
+
+  _load() {
+    try { return JSON.parse(localStorage.getItem(this.STORE_KEY) || 'null') || {}; } catch { return {}; }
+  },
+  _save(data) {
+    localStorage.setItem(this.STORE_KEY, JSON.stringify(data));
+  },
+
+  isConnected() {
+    const s = this._load();
+    return !!(s.access_token && s.athlete);
+  },
+  hasCredentials() {
+    const s = this._load();
+    return !!(s.client_id && s.client_secret);
+  },
+  athleteName() {
+    const s = this._load();
+    if (!s.athlete) return '';
+    return (s.athlete.firstname || '') + ' ' + (s.athlete.lastname || '');
+  },
+  lastSyncText() {
+    const s = this._load();
+    if (!s.last_sync) return 'Last sync: Never';
+    return 'Last sync: ' + new Date(s.last_sync).toLocaleString();
+  },
+
+  saveCredentials() {
+    const cid = (document.getElementById('strava-client-id')?.value || '').trim();
+    const csec = (document.getElementById('strava-client-secret')?.value || '').trim();
+    if (!cid || !csec) { alert('Enter both Client ID and Client Secret.'); return; }
+    const s = this._load();
+    s.client_id = cid;
+    s.client_secret = csec;
+    this._save(s);
+    El.render.settings();
+    setTimeout(() => {
+      const el = document.getElementById('strava-setup-section');
+      if (el) el.style.display = 'block';
+    }, 50);
+  },
+  clearCredentials() {
+    if (!confirm('Remove Strava credentials?')) return;
+    this._save({});
+    El.render.settings();
+    setTimeout(() => {
+      const el = document.getElementById('strava-setup-section');
+      if (el) el.style.display = 'block';
+    }, 50);
+  },
+
+  connect() {
+    const s = this._load();
+    if (!s.client_id) { alert('Save your Strava Client ID first.'); return; }
+    const redirectUri = 'https://eddietorresi.github.io/El/';
+    const params = new URLSearchParams({
+      client_id: s.client_id,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      approval_prompt: 'auto',
+      scope: 'activity:read_all'
+    });
+    window.location.href = 'https://www.strava.com/oauth/authorize?' + params.toString();
+  },
+
+  async exchangeCode(code) {
+    const s = this._load();
+    if (!s.client_id || !s.client_secret) {
+      console.warn('[El.strava] No credentials for token exchange');
+      return false;
+    }
+    try {
+      const resp = await fetch('https://www.strava.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: s.client_id,
+          client_secret: s.client_secret,
+          code,
+          grant_type: 'authorization_code'
+        })
+      });
+      if (!resp.ok) { console.warn('[El.strava] token exchange failed', resp.status); return false; }
+      const tok = await resp.json();
+      s.access_token  = tok.access_token;
+      s.refresh_token = tok.refresh_token;
+      s.expires_at    = tok.expires_at;
+      s.athlete       = tok.athlete;
+      this._save(s);
+      return true;
+    } catch(e) {
+      console.error('[El.strava] exchangeCode error', e);
+      return false;
+    }
+  },
+
+  async _ensureFreshToken() {
+    const s = this._load();
+    if (!s.access_token) return null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (s.expires_at && nowSec < s.expires_at - 300) return s.access_token;
+    // Refresh
+    try {
+      const resp = await fetch('https://www.strava.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: s.client_id,
+          client_secret: s.client_secret,
+          refresh_token: s.refresh_token,
+          grant_type: 'refresh_token'
+        })
+      });
+      if (!resp.ok) return null;
+      const tok = await resp.json();
+      s.access_token  = tok.access_token;
+      s.refresh_token = tok.refresh_token;
+      s.expires_at    = tok.expires_at;
+      this._save(s);
+      return s.access_token;
+    } catch(e) {
+      console.error('[El.strava] refresh error', e);
+      return null;
+    }
+  },
+
+  async syncActivities() {
+    const btn = document.querySelector('#strava-setup-section .btn-teal');
+    if (btn) { btn.textContent = '⏳ Syncing…'; btn.disabled = true; }
+
+    const token = await this._ensureFreshToken();
+    if (!token) {
+      El.ui.showToast('Strava token expired. Please reconnect.');
+      if (btn) { btn.textContent = '🔄 Sync Activities (Last 7 Days)'; btn.disabled = false; }
+      return;
+    }
+
+    const after = Math.floor((Date.now() - 7 * 86400 * 1000) / 1000);
+    try {
+      const resp = await fetch(
+        `https://www.strava.com/api/v3/athlete/activities?per_page=10&after=${after}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const acts = await resp.json();
+
+      const s = this._load();
+      s.activities  = acts;
+      s.last_sync   = new Date().toISOString();
+      this._save(s);
+
+      // Check for high-burn activities and offer macro adjustment
+      acts.forEach(a => { if ((a.calories || 0) > 300) this._offerMacroAdjust(a); });
+
+      El.render.settings();
+      setTimeout(() => {
+        const el = document.getElementById('strava-setup-section');
+        if (el) el.style.display = 'block';
+      }, 50);
+      El.ui.showToast(`✅ Synced ${acts.length} activit${acts.length===1?'y':'ies'} from Strava`);
+    } catch(e) {
+      console.error('[El.strava] syncActivities error', e);
+      El.ui.showToast('❌ Strava sync failed: ' + e.message);
+      if (btn) { btn.textContent = '🔄 Sync Activities (Last 7 Days)'; btn.disabled = false; }
+    }
+  },
+
+  _offerMacroAdjust(activity) {
+    const cal   = Math.round(activity.calories || 0);
+    const name  = activity.name || 'Activity';
+    const dist  = activity.distance ? (activity.distance / 1609.34).toFixed(1) + ' mi' : '';
+    const dateKey = (activity.start_date_local || '').slice(0, 10) || El.today();
+
+    // Don't offer twice for the same activity
+    const s = this._load();
+    const offered = s.offered_adjustments || [];
+    if (offered.includes(activity.id)) return;
+
+    setTimeout(() => {
+      if (confirm(`🏃 "${name}"${dist ? ' (' + dist + ')' : ''} burned ~${cal} calories.
+
+Add ${cal} calories to your macro goal for ${dateKey}?`)) {
+        this.adjustMacros(activity);
+      }
+      offered.push(activity.id);
+      s.offered_adjustments = offered;
+      this._save(s);
+    }, 1200);
+  },
+
+  adjustMacros(activity) {
+    const cal = Math.round(activity.calories || 0);
+    if (!cal) return;
+    const dateKey = (activity.start_date_local || '').slice(0, 10) || El.today();
+    const d = El.state.get();
+    if (!d.macros) d.macros = {};
+    if (!d.macros.calBonus) d.macros.calBonus = {};
+    d.macros.calBonus[dateKey] = (d.macros.calBonus[dateKey] || 0) + cal;
+    El.state.save();
+    El.ui.showToast(`🔥 +${cal} cal added to ${dateKey} goal!`);
+    // Re-render fitness if it's visible
+    if (El.nav.current === 'fitness' && El.render && El.render.fitness) El.render.fitness();
+  },
+
+  renderActivities() {
+    const s = this._load();
+    const acts = s.activities || [];
+    if (!acts.length) return '<div style="font-size:12px;color:var(--text2)">No activities synced yet.</div>';
+    return acts.map(a => {
+      const dist = a.distance ? (a.distance / 1609.34).toFixed(1) + ' mi' : '';
+      const cal  = a.calories ? a.calories + ' cal' : '';
+      const date = (a.start_date_local || '').slice(0, 10);
+      const esc  = El.ai.escapeHtml;
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(a.name||'Activity')}</div>
+          <div style="font-size:11px;color:var(--text2)">${date}${dist?' · '+dist:''}${cal?' · 🔥 '+cal:''}</div>
+        </div>
+        ${(a.calories||0)>300?`<button onclick="El.strava.adjustMacrosById(${a.id||0})" style="background:var(--teal-glow);border:1px solid var(--teal);color:var(--teal);border-radius:var(--radius-sm);padding:4px 8px;font-size:11px;cursor:pointer;white-space:nowrap">+${a.calories} cal</button>`:''}
+      </div>`;
+    }).join('');
+  },
+
+  adjustMacrosById(activityId) {
+    const s = this._load();
+    const a = (s.activities || []).find(x => x.id === activityId);
+    if (!a) { El.ui.showToast('Activity not found'); return; }
+    this.adjustMacros(a);
+  },
+
+  disconnect() {
+    if (!confirm('Disconnect Strava? This removes stored tokens and activity data.')) return;
+    const s = this._load();
+    // Keep credentials, clear auth data
+    this._save({ client_id: s.client_id, client_secret: s.client_secret });
+    El.render.settings();
+    setTimeout(() => {
+      const el = document.getElementById('strava-setup-section');
+      if (el) el.style.display = 'block';
+    }, 50);
+    El.ui.showToast('Strava disconnected');
+  }
+};
+
 window.El = El;
 window.ElDebug = () => ({ hasEl: !!window.El, data: El.state.get(), current: El.nav?.current });
 
 // ── BOOT ───────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // Strava OAuth authorization code flow — capture ?code= on redirect back
+  if (window.location.search && window.location.search.includes('code=') && window.location.search.includes('scope=')) {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code  = urlParams.get('code');
+      const scope = urlParams.get('scope') || '';
+      const error = urlParams.get('error');
+      // Clean up URL immediately so refresh doesn't re-trigger
+      history.replaceState(null, '', window.location.pathname);
+      if (code && !error && scope.includes('activity')) {
+        El.strava.exchangeCode(code).then(ok => {
+          if (ok) {
+            // Kick off first sync
+            const data2 = El.state.load();
+            if (data2 && data2.profile && data2.profile.name) {
+              setTimeout(() => {
+                El.ui.showToast('✅ Strava connected! Syncing activities…');
+                El.strava.syncActivities();
+              }, 1000);
+            }
+          } else {
+            alert('Strava token exchange failed. Check your Client Secret and try again.');
+          }
+        });
+      } else if (error) {
+        El.ui.showToast('Strava auth cancelled: ' + error);
+      }
+    } catch(e) { console.warn('[El] Strava OAuth parse error:', e); }
+  }
   // Google Calendar OAuth implicit flow — capture access_token on redirect back
   if (window.location.hash && window.location.hash.includes('access_token')) {
     try {
