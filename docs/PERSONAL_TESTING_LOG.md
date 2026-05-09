@@ -1,6 +1,6 @@
 # El Personal Testing Log
 
-Last updated: 2026-04-29 (build v9)
+Last updated: 2026-05-08 (build v20)
 
 ## Current Stage
 
@@ -265,6 +265,88 @@ Both work with Replace (clean slate) and Merge (adds new templates, updates goal
 - **Individual day sheets**: Mon+Thu Push, Tue+Fri Pull, Wed Legs with full progression notes
 
 To import: Finance tab → Import → pick `El_Fitness_Import.xlsx` → choose Replace or Merge.
+
+---
+
+## Changes Logged For Build v18 (2026-05-08) — Fitness Import Fix
+
+Build string: `2026-05-08-fitness-import-v18`
+
+### `_findSheet()` fuzzy helper
+
+SheetJS can return `undefined` when doing an exact-name lookup on sheets whose names contain non-alpha characters (spaces, dashes, special chars). This caused the fitness import to silently fail — no error, no data.
+
+Fixed by adding `_findSheet(wb, ...keys)` inside `El.settings`. The helper strips all non-alpha characters from both the candidate key and each entry in `wb.SheetNames`, then scans for a match case-insensitively. The first match wins. All sheet lookups in `_mapTrackerToElData()` now go through `_findSheet()` instead of direct bracket access.
+
+### `lastWorkoutName` continuation-row tracking
+
+"El Import - Workouts" rows where column A is blank are continuation rows belonging to the workout named in the most recent non-blank column A cell. Previously these rows were dropped because the workout name resolved to `undefined`.
+
+Fixed by introducing a `lastWorkoutName` variable that is updated whenever column A is non-empty, and used as a fallback when column A is blank. All exercises in a multi-exercise workout now import correctly.
+
+---
+
+## Changes Logged For Build v19 (2026-05-08) — Strava Integration
+
+Build string: `2026-05-08-strava-v19`
+
+### Full Strava OAuth 2.0 integration
+
+Added `El.strava` namespace with the following methods:
+
+- `connect()` — opens Strava OAuth authorization URL in a new tab. Redirect URI is `https://eddietorresi.github.io/El/`.
+- `exchangeCode(code)` — POSTs to `https://www.strava.com/oauth/token` with the authorization code and stores the returned access/refresh tokens in `localStorage` under the key `el_strava`.
+- `syncActivities()` — calls `GET /athlete/activities?per_page=10&after={7daysAgo}` using the stored access token. Returns the last 7 days of activities.
+- `adjustMacros(activities)` — for any activity where `kilojoules > ~300 cal`, writes a calorie bonus into `d.macros.calBonus[YYYY-MM-DD]`.
+- `renderActivities(activities)` — renders activity cards in the Strava panel.
+
+### Settings → Strava panel
+
+New panel in Settings with three states:
+
+1. **No credentials saved** — shows Client ID / Client Secret input fields and a "Connect Strava" button.
+2. **Credentials saved, not connected** — shows "Authorize with Strava" button.
+3. **Connected** — shows the connected athlete name, last sync time, and a manual "Sync Now" button.
+
+### Auto token exchange on page load
+
+On every page load, `El.strava.init()` checks for a `?code=` query parameter in the URL. If present, it automatically calls `exchangeCode()`, removes the query param from the URL via `history.replaceState`, and proceeds to sync activities.
+
+### Token storage
+
+All Strava state (`accessToken`, `refreshToken`, `expiresAt`, `clientId`, `clientSecret`, `athlete`) is stored in `localStorage.el_strava` — completely separate from app data in `localStorage.el_data`.
+
+### Macro bonus from activities
+
+Activities exceeding ~300 cal (converted from Strava's kilojoules field) prompt a "+cal" button that adds the burned calories to `d.macros.calBonus[date]`, raising that day's effective calorie target by the activity burn.
+
+---
+
+## Changes Logged For Build v20 (2026-05-08) — Activity Macros Toggle
+
+Build string: `2026-05-08-strava-v20`
+
+### "Auto-adjust macros from activities" toggle
+
+Added a pill toggle in the connected Strava panel labelled "Auto-adjust macros from activities". Stored as `el_strava.adjustMacrosEnabled` (boolean). Defaults to `true` for new users.
+
+- When **ON** (default): sync runs normally, activities display, and `adjustMacros()` fires after each sync so calorie bonuses are applied automatically.
+- When **OFF**: sync still runs and activities still render, but `adjustMacros()` is skipped entirely. The "+cal" button is also hidden from activity cards when this toggle is off.
+
+This gives a clean way to use Strava activity data for logging/awareness without having the macro targets change automatically.
+
+### `.gitattributes` — CI line-ending fix
+
+GitHub Actions was failing on Ubuntu runners because git's CRLF conversion was corrupting the shebang line of `scripts/check-integrity.sh`, making it unparseable on Linux. Fixed by committing a `.gitattributes` file at repo root:
+
+```
+* text=auto eol=lf
+*.sh text eol=lf
+```
+
+This forces LF on all text files and explicitly enforces LF for shell scripts, so CRLF never reaches Ubuntu runners regardless of the Windows dev environment. CI is green again.
+
+**Commit:** `8a670c2` — "feat: activity macros toggle, Strava OAuth (v19+v20)" — 8,458 lines
 
 ---
 
