@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-10 (build v20 + security rounds 1–4 + native UX rounds 5–8)
+Last updated: 2026-05-10 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -654,6 +654,143 @@ crashes.
 
 ---
 
+## 🚀 2026-05-10 — Round-9 deployment milestones
+
+This round is about getting Eddie's app off the laptop and onto a
+real iPhone. No new features; just deployment plumbing + a small UX
+clean-up that surfaced during testing.
+
+### EAS / Apple Developer / dev-client install — DONE
+
+1. **GitHub remote wired for ElNative.** `Downloads/ElNative` was
+   previously local-only. Now pushed to
+   `https://github.com/EddieTorresi/ElNative` (private). Branch
+   `master`, HTTPS remote (SSH key wasn't set up; switched). All
+   uncommitted work through Round-8 is committed.
+
+2. **Apple Developer Program enrollment + EAS iOS dev build.**
+   - Apple ID: `eddietorresi@yahoo.com`
+   - Apple Team: `Eddie Torres (LBD4JAP8XA)` — Individual account.
+   - Bundle ID `com.eddietorresi.elnative` registered with Apple.
+   - Distribution certificate generated server-side by EAS, valid
+     until 2027-05-10.
+   - Ad-Hoc provisioning profile generated, includes Eddie's iPhone
+     (UDID `00008130-00016D263A93803A`).
+   - EAS auto-installed `expo-dev-client` (~5KB dep) when it noticed
+     the dev profile didn't have it. Committed.
+   - Build #1: `0cca8b78-6f17-4e42-9bb8-182bd5d1e491` —
+     `https://expo.dev/accounts/returningnovice/projects/ElNative/builds/...`
+   - Project owner: Expo username `returningnovice`.
+
+3. **Dev client installed on Eddie's iPhone.** First-launch hit the
+   iOS 16+ "Developer Mode" gate. Process documented:
+   - Tap app icon (fails) → forces Developer Mode toggle to appear in
+     Settings → Privacy & Security → Developer Mode → toggle ON.
+   - Phone restart required (iOS prompts).
+   - After reboot, "Turn On Developer Mode?" popup → Turn On.
+   - For ad-hoc-distributed dev clients with Developer Mode ON, the
+     "VPN & Device Management" trust step is **not** required. The
+     app launches directly. (Different from older iOS or
+     enterprise-distribution apps where you must trust the developer
+     under VPN & Device Management.)
+
+4. **Daily dev workflow now is:**
+   ```
+   cd "C:\Users\Lap top\Downloads\ElNative"
+   npx expo start --dev-client
+   ```
+   Open the `ElNative (dev)` app on iPhone → it auto-detects Metro on
+   the same WiFi → loads the bundle. JS/TSX edits hot-reload in
+   seconds. OAuth flows complete because the binary is registered to
+   the `elnative://` scheme.
+
+   For non-WiFi networks: `npx expo start --dev-client --tunnel`.
+
+   New native builds only needed when: bumping Expo SDK, changing
+   `app.json`, or adding a native module not yet in the bundle.
+
+### Round-9 UX polish
+
+5. **Activity Sync section reframed.** Settings → Activity Sync used
+   to label the OAuth provider list as "Provider APIs (mainly for
+   developer testing)." Misleading — Phone Health (HealthKit) isn't
+   actually wired yet, so the OAuth providers ARE the production path
+   for fitness sync today. Reworded:
+   - Section intro now says "Connect a fitness service to sync your
+     workouts."
+   - Toggle button reads "Connect Fitness Services" / "Hide Fitness
+     Services" instead of "Show Provider APIs."
+   - Hint inside the expanded list points users at each provider's
+     developer portal for a Client ID and notes which services need
+     a Client Secret.
+
+   The underlying `ActivityProviderCard` component (~90 lines in
+   `settings.tsx` line 890) was already correct — saves credentials
+   to SecureStore via `providerCredsKey(...)`, runs `oauth.connect`
+   with the right args based on `config.requiresSecret`. No code
+   change needed.
+
+   **Superseded by Round-10:** this provider-credential UI is no
+   longer the user-facing path. Normal app builds should use Apple
+   Health for on-device activity data and app-owned backend/proxy
+   services for any provider-specific cloud sync.
+
+### Pre-launch items still open
+
+- **Round-10 update (2026-05-10): app-owned connections replace user
+  credential setup.** After testing the dev client on iPhone, Eddie
+  confirmed the app must feel like a normal consumer app, not a
+  developer console. `ElNative/constants/appServices.ts` now reads
+  build-time service config from `expo.extra.appServices`:
+  `googleCalendarClientId`, `aiProxyUrl`, `transcriptionProxyUrl`,
+  and `fitnessBackendUrl`. Secrets must stay server-side behind those
+  proxy/backend endpoints; never put client secrets in `app.json`.
+
+- **Settings no longer asks normal users for API keys or provider
+  developer credentials.** `settings.tsx` now shows app-managed AI,
+  voice, activity sync, and Google Calendar states. Google Calendar
+  calls `useGoogleCalendar().connect()` with the bundled client ID
+  when present. Activity Sync points users toward Apple Health as the
+  main no-credential path and hides the old provider credential form.
+  The old direct-key paths are retained only as local developer
+  fallbacks when a key was already saved on the device.
+
+- **AI/voice/scanner connection behavior changed.** `useAI.ts` uses
+  `appServices.aiProxyUrl` when configured, with a SecureStore key only
+  as a developer fallback. `useVoiceInput.ts` uses
+  `appServices.transcriptionProxyUrl` first. Finance receipt scanning
+  and Nutrition food scanning now use the app AI proxy when configured
+  and otherwise show a build-configuration message instead of telling
+  users to add an API key.
+
+- **Apple Health prep added, but HealthKit import is not wired yet.**
+  `app.json` now includes `NSHealthShareUsageDescription` and
+  `NSHealthUpdateUsageDescription` copy. A future native pass still
+  needs to add the HealthKit dependency/plugin and implement the actual
+  read/import flow for workouts, activities, weight/body metrics, and
+  compatible wearable app data.
+
+- **Apple Health UI wording cleanup.** The user-facing Settings card
+  now says **Apple Health**, not "Phone Health." The card clearly says
+  HealthKit import is not connected in the current build and labels the
+  path as "Coming in next dev build." The confusing "Cloud provider
+  sync" row was removed from the visible app because it was backend
+  implementation language, not an action a normal user can take.
+
+- **SheetJS SRI hash** in El web `index.html` — paste before any
+  public launch. Comment above the constant has the curl one-liner.
+- **Privacy policy** for the App Store / Google Play submission.
+- **TestFlight (iOS) or Internal Testing (Android) release** when
+  Eddie wants non-local testers. The `eas.json` already has a
+  `preview` profile that's correctly configured for both — switch
+  the command from `--profile development` to `--profile preview`.
+- **Two deferred LOW security items** from the Round-8 audit
+  (`ai.tsx:164` chat-history JSON.parse, `settings.tsx:906` Strava
+  credentials JSON.parse) — both have try/catch fallback, neither
+  is exploitable today; clean up in a v2 sprint.
+
+---
+
 ## Critical Write Rules
 
 These rules exist because of real data-loss incidents in prior sessions:
@@ -967,160 +1104,122 @@ All features from the El PWA have been shipped in ElNative. Beyond strict parity
 
 **Short answer: No, for the native app.**
 
-In ElNative the Anthropic key (`el_anthropic_key`) and Whisper key (`el_whisper_key`) are stored in `expo-secure-store` (iOS Keychain / Android Keystore). They are retrieved immediately before an API call and placed in an HTTP `Authorization` / `x-api-key` header. They are **never** injected into any prompt string, never stored in AsyncStorage, and never appear in any chat message or AI response. Claude has no access to the key — it's opaque HTTP metadata by the time it reaches the API. Prompt injection cannot extract something that was never in the prompt.
-
-The only realistic extraction vectors are:
-1. **Jailbroken device** — hardware-backed storage can be bypassed on compromised devices. Acceptable risk for a personal app; backend proxy eliminates it for a public release.
-2. **HTTPS interception (MITM)** — attacker would need the user to trust a malicious root certificate. Network traffic is all HTTPS; no `http://` endpoints exist.
-3. **Malicious code in the app bundle** — not a concern for a personal build; would require a supply-chain attack.
-
-**For the PWA** (`localStorage`): any JS running on the same origin could read `el_data` and the key. The CSP restricts what scripts can load, but `'unsafe-inline'` is required due to the single-file architecture. Acceptable for personal use; a public release should either use a backend proxy or store the key in a `httpOnly` cookie (which requires a server).
-
-**Rule going forward:** the key must never appear in:
-- Any string passed to `messages[].content`
-- Any `console.log` / `Alert.alert` / UI render
-- Any JSON export (`exportData` already strips `SECRET_KEYS` — keep that list updated)
+In ElNative the Anthropic key (`el_anthropic_key`) and Whisper key (`el_whisper_key`) are stored in `expo-secure-store` (iOS Keychain / Android Keystore). They are retrieved immediately before an API call and placed in an HTTP `Authorization` / `x-api-key` header. They are **never** injected into any prompt string, ne
 
 ---
 
-## 📋 Backlog (pre-App Store items)
+## 🍎 2026-05-10 — Round-13: Apple Health full integration (ElNative)
 
-These are known gaps deferred for the EAS build / App Store phase. Do not start them in Expo Go.
+This round took Apple Health from "stub UI / not actually connected" to a
+real, end-to-end HealthKit integration that surfaces in five places across
+the app. Builds on Round-12's `@kingstinct/react-native-healthkit` v14
+install + config plugin work.
 
-### 1. Backend proxy for AI key (required for public release)
-**Problem:** BYOK (bring-your-own-key) requires users to have Anthropic accounts, which is not realistic for a general audience. Showing raw `sk-ant-...` input fields also looks suspicious.
-**Solution:** A lightweight proxy (Cloudflare Worker or Vercel Edge Function) that holds Eddie's Anthropic key server-side. The app calls `https://el-api.eddietorresi.com/chat` (or similar); the proxy forwards to `api.anthropic.com` with the real key. Users see no key input.
-**Scope:** ~50 lines of Cloudflare Worker JS + one DNS record. Settings → AI section becomes "AI is built-in" with no key field.
-**Prerequisite:** EAS build (custom domain needs to be allowlisted in `app.json` CSP equivalent for native fetch).
+### Architecture
 
-### 2. Native platform STT for voice input (replaces Whisper)
-**Problem:** Whisper requires a separate OpenAI API key. On-device iOS/Android STT is free and requires no external account.
-**Solution:** Replace `hooks/useVoiceInput.ts` with `@react-native-voice/voice`. This package wraps iOS `SFSpeechRecognizer` and Android `SpeechRecognizer` — both free, on-device (or Apple/Google cloud, user's choice via device settings).
-**Scope:** Replace the hook, remove `el_whisper_key` from SecureStore, remove Voice Input section from Settings, remove `expo-av` if no other audio use.
-**Prerequisite:** EAS custom dev build (native module; not available in Expo Go managed workflow).
-
-### 3. EAS build + App Store submission
-- Apple Developer account ($99/yr) required
-- `eas.json` config (no secrets inline — use EAS Secrets dashboard)
-- Privacy policy needed: app sends transaction descriptions, workout data, and macro logs to Anthropic API. Note this explicitly.
-- `NSUsageDescription` strings already in `app.json` (camera, photo library, microphone)
-- `android.allowBackup: false` already set
-- Garmin developer access: submit application early (approval takes days)
-
-### 4. SheetJS SRI hash for PWA
-Run the one-liner in the `🔒 2026-05-09 Round-1` section above and paste the hash into `EL_XLSX_SRI` in `index.html` before public launch.
-
----
-
-## 💰 2026-05-09 — AI cost optimization (local-first design)
-
-ElNative is designed to use as few API calls as possible. Eddie / the El team will bear hosting costs for a public release, so every unnecessary AI call is real money. The three highest-call-volume functions have been made **local-first**.
-
-### services/categorizer.ts (NEW FILE)
-
-A pure TypeScript merchant/keyword lookup table with no imports and no async work. `categorizeLocally(description)` returns `{ category, confidence }`. Confidence ≥ 0.75 means skip Claude.
-
-**Coverage:** ~200 named merchants (Starbucks, Netflix, Uber, Amazon, etc.) at confidence 0.95, plus keyword rules (restaurant, gym, streaming, etc.) at confidence 0.80. Unknown descriptions return confidence 0.10 → fall through to Haiku.
-
-**Rule:** When adding a new feature that categorizes transactions, call `categorizeLocally` first. Only call `categorizeTxn()` in elAI.ts if the result falls below `CATEGORIZER_THRESHOLD`.
-
-### services/elAI.ts — local-first changes
-
-#### categorizeTxn()
-Now calls `categorizeLocally(description)` first. If confidence ≥ 0.75, returns the local result with no API call. Known merchants (the majority of daily transactions) are free. Claude Haiku is only used for ambiguous strings like "Misc payment #3847" or "AMZN*RT5HBQ."
-
-#### quickCapture()
-A new `localCapture(text)` function handles clear-cut inputs via regex before touching the API:
-- Any input with a `$XX.XX` amount → transaction (expense or income based on keywords like "salary", "refund"). Category comes from `categorizeLocally`.
-- "remind me to X" or "don't forget Y" → reminder
-- Event keyword (dentist, meeting, flight, birthday…) + explicit day/time → event
-
-Only ambiguous inputs (e.g. "go for a run", "how are my finances") fall through to Claude Haiku. Typical user captures ("$45 groceries", "dentist Thu 2pm", "remind me to pay rent Monday") cost $0.
-
-**Supported date resolution (local):** today, tomorrow, next week, Mon–Sun (full + 3-letter abbreviations), ISO `YYYY-MM-DD`.
-**Supported time resolution (local):** 12-hour (`2pm`, `9:30am`) and 24-hour (`14:00`).
-
-#### getWeeklyInsights()
-Results are cached in AsyncStorage under `el_weekly_insights_cache` for **24 hours**, keyed by a data fingerprint (transaction count + total spending + workout count + nutrition days + Strava activity count for the current week). Tapping "Refresh" on unchanged data returns the cached result instantly. Only a meaningful data change (new transaction, new workout, etc.) or a 24-hour expiry triggers a Sonnet call.
-
-**Cache read/write failures are non-fatal** — both wrapped in try/catch; the function falls through to a live API call.
-
-### What still always calls Claude
-
-| Function | Model | Why always AI |
+| Layer | File | Role |
 |---|---|---|
-| `generateFitnessPlan` | Sonnet | Complex structured output; no local equivalent |
-| `answerHealthQuery` | Sonnet | Open-ended Q&A; requires reasoning over user data |
-| `answerWithActions` | Sonnet | Open-ended Q&A + action detection |
-| `quickCapture` (fallback) | Haiku | Ambiguous inputs with no clear local parse |
-| `categorizeTxn` (fallback) | Haiku | Unknown merchant strings |
+| Native binding | `app.json` | HealthKit plugin entry with `NSHealthShareUsageDescription` / `NSHealthUpdateUsageDescription`; usage descriptions also in `ios.infoPlist`. Requires a fresh dev build (`eas build --profile development --platform ios`). |
+| Hook | `hooks/useAppleHealth.ts` | Comprehensive v14 wrapper. 24 read identifiers covering rings, movement, workouts, body composition, vitals, sleep, dietary intake, mindfulness. Single-object auth signature `await fn({ toRead, toShare })`. Every native call wrapped in `try/catch` and surfaced through `state.error` rather than thrown. |
+| Data import | `hooks/useElData.ts` | Two new methods exported on the provider: `importHealthWeights(weights)` dedups against `weightLog` by date and returns the count of new entries; `importHealthDayMacros(today)` validates and replaces today's `macroLog` entry. |
+| Component (Settings) | `components/apple-health-card.tsx` | Auto-syncs on focus via `useFocusEffect`. Rich status block when synced (rings, movement, sleep, body, vitals, diet, workout count, sources). |
+| Component (Dashboard) | `components/health-today-card.tsx` | Compact summary: rings (Move/Exercise/Stand), steps, distance, flights, sleep last night. Auto-fetches on mount + focus. |
+| Component (Fitness) | `components/health-workouts-card.tsx` | Last 7 days of HealthKit workouts (type, duration, distance, calories). Auto-fetches on mount + focus, deduped by uuid, newest-first. |
+| Component (Nutrition) | `components/import-health-button.tsx` | Reusable button with `kind="weight" \| "macros"`. Dispatches to `useAppleHealth` then `useElData`. |
 
-### What never calls Claude (after this pass)
+### Where the user touches Apple Health data
 
-- Categorizing "Starbucks", "Netflix", "Uber", "Whole Foods", "Shell", and ~200 other named merchants
-- Categorizing any description matching keyword rules (restaurant, gym, streaming, pharmacy, etc.)
-- Quick captures with an explicit dollar amount ("$45 groceries", "paid rent $1200")
-- Quick captures with explicit event language + a day/time ("dentist Thu 2pm")
-- Explicit reminder language ("remind me to call dentist Monday")
-- Weekly insights within 24 hours of a previous generation on unchanged data
+| Screen | Surface |
+|---|---|
+| Dashboard (`app/(tabs)/index.tsx`) | `<HealthTodayCard />` directly under the Health Score card |
+| Fitness → Workouts tab (`app/(tabs)/fitness.tsx`) | `<HealthWorkoutsCard />` at the top of the Workouts segment, above Templates |
+| Nutrition → Today tab (`app/(tabs)/nutrition.tsx`) | `<ImportFromAppleHealthButton kind="macros" />` at top of ScrollView |
+| Nutrition → Weight Log section | `<ImportFromAppleHealthButton kind="weight" />` directly above the section title |
+| Settings → Apple Health card | Auto-syncs on focus, rich multi-section status block |
 
----
+### Conventions every health component follows
 
-## 📱 2026-05-09 — ElNative session: tracker import, Strava → Settings, edit flows, food scanner, health score fix
+1. `if (!health.isAvailable) return null;` — Android/web render nothing so the parent can drop the component in unconditionally.
+2. iOS-without-authorization renders a small "Connect Apple Health" CTA that routes to `/(tabs)/settings`.
+3. iOS-with-authorization auto-fetches on mount **and** on screen focus via `useFocusEffect`. Reads are local (no network), so refreshing on every focus is cheap.
+4. Native errors are caught inside the hook; components never see thrown errors.
+5. Theme colors via `useElTheme()` only; no hardcoded hex.
 
-### 1. Financial Tracker XLSX import (`app/(tabs)/settings.tsx`)
+### Critical: HealthKit v14 API signature
 
-`parseFinancialTracker(wb, existing)` — a full TypeScript port of the web version's `_mapTrackerToElData`. Detects tracker workbooks via `isTrackerWorkbook(wb)` (looks for "Dashboard" sheet, or Debts + Expenses combination). Reads the following sheets:
+The `requestAuthorization` call **must** pass a single object, not positional arrays:
 
-- **Dashboard** → `incomeSources`, `budget.monthly`
-- **Debts** → `debts`
-- **Expenses** → `recurring` categories + items. **IMPORTANT:** category is stored by name string, not ID. `category: catName` — never `category: catMap[key].id`.
-- **Net Worth** → `savings`, `accounts`
-- **Notes & Goals** → `plan` items
-- **El Import - Workouts** → `workouts.templates`
-- **El Import - Macros** → `macros.goals`
+```typescript
+// ✅ CORRECT (v14)
+await hk.requestAuthorization({ toRead: READ_IDENTIFIERS, toShare: [] });
 
-Imported recurring items have `nextDate` set to the 1st of next month (never empty string — an empty `nextDate` causes "Date value out of bounds" crash in `schedule.tsx`'s `buildSyntheticBills`).
+// ❌ WRONG (legacy / pre-v14) — throws "expected 1 argument, but received 2"
+await hk.requestAuthorization(READ_IDENTIFIERS, []);
+```
 
-**Per-section import toggles:** the confirm screen shows one Switch per detected section. Only sections with actual data are pre-shown. User can disable any section before importing. Only enabled sections are merged into existing data.
+This is the bug Eddie hit when first tapping Connect on AppleHealthCard. Do not regress this.
 
-**`schedule.tsx` crash guard:** `buildSyntheticBills` now has `if (!exp.nextDate) continue;` to skip any recurring item without a scheduled date.
+### NTFS mid-write truncation — recurring issue
 
-### 2. Strava connect moved to Settings
+The Edit/Write tools occasionally report success but the file gets cut off
+mid-stream on disk (NTFS mount artifact). Symptoms:
+- `tsc` reports `TS1005 '}' expected` mid-style or mid-block
+- Metro bundle fails with mismatched braces
+- `wc -c` shows the file is hundreds of bytes shorter than expected
 
-All Strava credential input (Client ID, Client Secret) and the OAuth connect/disconnect flow now live in **Settings → Strava** section. The Fitness tab no longer contains `StravaConnectPanel` or any SecureStore credential handling. When Strava is not connected, the Fitness → Activities tab shows a redirect message pointing to Settings.
+**Repair pattern (proven this round on `nutrition.tsx`, `fitness.tsx`,
+`useElData.ts`, `settings.tsx`, `index.tsx`, `schedule.tsx`, `app.json`):**
 
-### 3. Fitness tab: "Strava" sub-tab renamed to "Activities"
+```python
+import os, tempfile
+p = "path/to/file"
+with open(p, "rb") as f: data = f.read()
 
-`fitness.tsx`: tab state type changed from `'Workouts' | 'Strava'` to `'Workouts' | 'Activities'`. All `tab === 'Strava'` comparisons updated to `'Activities'`. The `options` array updated to `['Workouts', 'Activities']`.
+# Append/splice the missing tail
+new_data = data + missing_bytes  # or splice via marker
 
-### 4. Recurring items edit (`app/(tabs)/finance.tsx`)
+dir_ = os.path.dirname(p) or "."
+fd, tmp = tempfile.mkstemp(prefix=".tmp.", dir=dir_)
+with os.fdopen(fd, "wb") as f:
+    f.write(new_data)
+    f.flush()
+    os.fsync(f.fileno())   # critical
+os.replace(tmp, p)         # atomic
+```
 
-- `RecurringRow` now accepts an `onEdit` prop and supports long-press → Alert with Edit/Delete options.
-- Category display resolves by both name and ID: `categories.find(c => c.name === item.category || c.id === item.category)` — handles both manually-added and tracker-imported items.
-- `AddRecurringModal` accepts an `initial?: RecurringExpense | null` prop. A `useEffect` pre-fills all form fields when `initial` is set. Title shows "Edit Recurring" vs "Add Recurring".
-- `BudgetTab` wires up `updateRecurring` and an `editingRecurring` state; the modal's `onSave` uses `updateRecurring` when editing.
+The combination of `fsync()` then `os.replace()` defeats the truncation —
+ordinary writes through the Edit tool keep getting cut off.
 
-### 5. Debt edit discoverability (`app/(tabs)/finance.tsx`)
+### Files changed this round
 
-- `DebtCard` now shows explicit **Edit** and **Delete** buttons at the bottom of each card instead of relying solely on undiscoverable long-press.
-- `handleSave` in `DebtsTab` preserves `originalBalance` by spreading `editingDebt` first: `{ ...editingDebt, ...debt, id: editingDebt.id }`.
-- New debt save correctly sets `originalBalance: parseFloat(form.balance)`.
+| File | Change |
+|---|---|
+| `hooks/useAppleHealth.ts` | Expanded from stub to comprehensive v14 wrapper (24 identifiers, fetchTodayAll aggregator, fetchWorkouts/fetchWeight/fetchTodayRings/fetchTodayMovement/fetchBodyComposition/fetchVitals/fetchLastNightSleep/fetchTodayNutrition) |
+| `hooks/useElData.ts` | +`importHealthWeights`, +`importHealthDayMacros` exposed on context value |
+| `components/apple-health-card.tsx` | Auto-sync on focus + rich status block |
+| `components/health-today-card.tsx` | New — Dashboard summary card |
+| `components/health-workouts-card.tsx` | New — Fitness Workouts tab card |
+| `components/import-health-button.tsx` | New — Reusable import button (weight/macros) |
+| `app/(tabs)/index.tsx` | Mount `<HealthTodayCard />` after Health Score |
+| `app/(tabs)/fitness.tsx` | Mount `<HealthWorkoutsCard />` at top of Workouts tab |
+| `app/(tabs)/nutrition.tsx` | Mount `<ImportFromAppleHealthButton />` × 2 (macros + weight) |
+| `app/(tabs)/settings.tsx` | Auto-sync via `useFocusEffect`; reworded "Connect Fitness Services" |
+| `app/(tabs)/schedule.tsx` | (Round-12 carry-over) `advanceDate` now returns `string \| null`; hard-cap 60 emissions per source; chooser modal for synthetic recurring events |
+| `app.json` | HealthKit plugin entry + Info.plist usage descriptions; bundle id `com.eddietorresi.elnative` |
 
-### 6. Food/recipe scanner (`app/(tabs)/nutrition.tsx`)
+### Test steps for the next dev build
 
-`scanFoodWithClaude(base64, mediaType)` — Claude Haiku vision call that returns `{ name, calories, protein, carbs, fat }`. `AddFoodModal` has a **📷 Scan Label or Meal** button above the food name field. Tapping shows a Camera/Library picker (via `expo-image-picker`), encodes the image, calls the scanner, and auto-fills the form fields.
+1. `cd ElNative && eas build --profile development --platform ios`
+2. Install the resulting `.ipa` on Eddie's iPhone (Ad-Hoc provisioning, dev mode enabled).
+3. Open El → Settings → tap Apple Health → grant all categories. Card should switch to "Synced" and show rings/movement/sleep/body/vitals/diet rows when data exists.
+4. Pull-down on Dashboard → `HealthTodayCard` should render rings + steps.
+5. Fitness → Workouts → `HealthWorkoutsCard` should list any workouts logged via Watch / Strava-to-Health / Nike Run / etc. in the last 7 days.
+6. Nutrition → Today → tap "Import from Apple Health" (macros) → today's macroLog should populate from any food-tracking app that writes to HealthKit (MyFitnessPal, Lifesum, etc.).
+7. Nutrition → Weight Log → tap "Import from Apple Health" (weight) → up to 30 days of body mass entries should appear, dedup by date.
 
-### 7. Financial Health score fallback (`app/(tabs)/index.tsx`)
+### Known follow-up
 
-`computeHealthScore` previously received `income` derived solely from this month's income transactions. After a fresh tracker import with no logged transactions, `income = 0`, causing misleading 0% scores.
+- **Garmin Connect** integration (next): OAuth + activity import. No native SDK available; will use Garmin Connect IQ / Health API REST endpoints over OAuth 1.0a (or OAuth 2.0 via the new Connect Developer Portal).
+- **Strava** integration tightening (after Garmin): activity import is wired but should also write back to Apple Health via `saveQuantitySample` so cross-app sync is bidirectional.
+- **iOS write-back to Health**: currently `toShare: []` everywhere. Future expansion can let El write weight, water, mindfulness sessions back to HealthKit so other apps see El's data.
 
-**Fix:** before calling `computeHealthScore`, an `estimatedFromSources` value is computed from `data.incomeSources` using frequency multipliers (`weekly: 52/12`, `biweekly: 26/12`, `monthly: 1`, `yearly: 1/12`). `effectiveIncome = income > 0 ? income : estimatedFromSources` is passed to `computeHealthScore`. Transaction-logged income still takes priority when available.
-
-### Codex checklist additions for this session
-
-- When adding a new recurring item import path: always set `nextDate` to a valid ISO date string (never `''`).
-- When storing recurring expense category from tracker: use category name, not ID.
-- When adding new income source frequency types to `incomeSources`: add the corresponding multiplier key in the `index.tsx` health score `estimatedFromSources` computation.
-
----
