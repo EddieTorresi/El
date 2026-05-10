@@ -1,12 +1,529 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-08 (build v20)
+Last updated: 2026-05-10 (build v20 + security rounds 1–4 + native UX rounds 5–8)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
 ---
 
-## App Architecture
+## 🔒 2026-05-09 — Pre-launch security hardening (READ THIS)
+
+A full security pass landed across both `El/El` (web/PWA) and the
+`ElNative` Expo project. The changes below are intentional — do NOT
+"clean up" any of them without understanding why they exist. Each fix
+includes a `SECURITY:` comment in the source.
+
+### EL Web (`El/El`)
+
+1. **CSP / Referrer-Policy / Permissions-Policy meta tags** added to
+   `index.html` `<head>` (just below `apple-touch-icon`). CSP allows
+   inline scripts/styles (the app is single-file inline) but locks
+   `connect-src` to the actual API endpoints we call:
+   `api.anthropic.com`, `api.openai.com`, `www.strava.com`,
+   `www.googleapis.com`, `oauth2.googleapis.com`, `accounts.google.com`.
+   When adding a new API, update CSP `connect-src`.
+
+2. **Service-worker offline navigation fallback** added to `sw.js`
+   `fetch` handler. Uncached navigations fall back to `./index.html`
+   so users see the app shell instead of a network error.
+
+3. **Manifest icons** — added 180×180 entry; bumped 512px to
+   `purpose: "any maskable"` for cleaner Android adaptive rendering.
+
+4. **`exportData()` strips secrets.** The list of stripped keys lives
+   in `SECRET_KEYS` inside `El.settings.exportData`. **When you add a
+   new credential field to `d.settings`, also add it to `SECRET_KEYS`.**
+   Strava credentials (in `localStorage.el_strava`) are not exported
+   at all. Exports now include `_exportSecretsStripped: true`.
+
+5. **XLSX import — prototype pollution defense.** `_showXLSXPreview`
+   defines a local `_safeMerge(...)` helper that replaces every
+   `Object.assign({}, A, parsed)` site that touched untrusted XLSX
+   data. `_safeMerge` drops `__proto__`, `constructor`, `prototype`
+   keys. Any future merge of parsed XLSX content MUST use `_safeMerge`,
+   not `Object.assign`.
+
+6. **SheetJS load — pinned URL + CORS + opt-in SRI.** The CDN script
+   is loaded with `crossOrigin="anonymous"` and `referrerPolicy=
+   "no-referrer"`. The SRI hash is read from a single constant
+   `EL_XLSX_SRI` inside `handleSpreadsheetFile`. It defaults to empty
+   (no integrity enforcement). To enable SRI before a public launch,
+   compute the hash on a trusted machine:
+   ```
+   curl -sSL https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js \
+     | openssl dgst -sha384 -binary | openssl base64 -A
+   ```
+   …and paste the result as `"sha384-…"` into `EL_XLSX_SRI`. **Do not
+   ship a fabricated hash — it silently breaks XLSX import.**
+
+7. **Google Calendar OAuth — auth-code flow with PKCE + state.**
+   Replaces the old implicit (`response_type=token`) flow.
+   - `El.settings._genCodeVerifier()`, `_genCodeChallenge()`,
+     `_genState()` produce the PKCE pair + CSRF state.
+   - `startGcalOAuth()` is now `async`, persists `el_gcal_verifier`
+     and `el_gcal_state` in `sessionStorage` before redirecting.
+   - The boot handler in the `DOMContentLoaded` listener replaces the
+     hash-fragment parsing with a `?code=` + state-validation +
+     `oauth2.googleapis.com/token` exchange. Refresh token is stored
+     in `d.settings.gcalRefreshToken` if Google returns one.
+   - **Mutual exclusion with Strava boot handler:** Strava's branch
+     fires only when `?code=…&scope=…` is present (Strava puts scope
+     in the query). Google's code-flow redirect omits `scope=`, so
+     the GCal branch additionally requires `scope=` to be absent. Do
+     not change either condition without re-checking both flows.
+
+8. **AI prompt-injection defense (`buildDynamicContext`).** A local
+   `_safe(s, max)` helper is applied to every user-supplied string
+   that gets concatenated into the system prompt: profile name /
+   currency / risk, debt names, savings names, transaction
+   descriptions, category names, event titles, plan item text. The
+   sanitizer neutralizes any `[[EL_ACTION:` literal so a malicious
+   transaction memo or calendar title cannot induce the AI to emit a
+   fake action back to us, and caps each field's length so a single
+   string can't blow out the context window. **When adding a new
+   user-controlled field to `buildDynamicContext`, wrap it in `_safe`.**
+
+### EL Native (`ElNative`)
+
+1. **Duplicate `useElData.tsx` deleted.** `hooks/useElData.ts` is the
+   single canonical data layer. Module resolution is no longer
+   ambiguous. Do not re-create the `.tsx` variant.
+
+2. **OAuth `state` validation in `useOAuthProvider`.**
+   `utils/pkce.ts` now exports `generateState()` (16 random bytes,
+   base64url). `useOAuthProvider.connect()` generates a state, sends
+   it, and validates the redirect with `safeCompare()` (constant-time)
+   before exchanging the code. The redirect URL is also checked to
+   start with `provider.redirectUri` so an attacker can't redirect to
+   a non-app URL with a stolen state.
+
+3. **`OAuthTokens.extra` whitelist.** `FitnessProviderConfig` now has
+   an `extraFields?: readonly string[]`. Only those fields are copied
+   from the token response into `extra` before persisting to
+   SecureStore. For Strava, `extraFields: ['athlete']`. **Any new
+   provider that needs to persist provider-specific data must declare
+   the allow-list explicitly.** Token response shape is also validated
+   (`access_token` required, `refresh_token` typed if present).
+
+4. **`app.json` store-readiness fields.**
+   - `ios.bundleIdentifier`: `com.eddietorresi.elnative`
+   - `android.package`: `com.eddietorresi.elnative`
+   - `ios.infoPlist`: `NSCameraUsageDescription`,
+     `NSPhotoLibraryUsageDescription`, `NSMicrophoneUsageDescription`,
+     `NSAppTransportSecurity { NSAllowsArbitraryLoads: false }`,
+     `ITSAppUsesNonExemptEncryption: false`.
+   - `android.allowBackup: false` — prevents Google One backup of
+     EncryptedSharedPreferences (the SecureStore backing on Android).
+   - `android.permissions`: INTERNET, CAMERA, RECORD_AUDIO,
+     READ_MEDIA_IMAGES.
+   - `android.blockedPermissions`: location (we don't use it; opt out
+     so Expo doesn't auto-request).
+
+5. **XLSX import hardening (`app/(tabs)/settings.tsx`).** The
+   `SpreadsheetImportModal` defines `MAX_FILE_SIZE` (5 MB),
+   `MAX_CELL_LEN` (1000 chars), `MAX_ROWS` (5000), `FORMULA_PREFIX`
+   regex, and a `sanitizeCell(raw)` helper. Every cell from CSV or
+   XLSX is run through `sanitizeCell` before display or import.
+   Formula-injection prefix (`= + - @`) is neutralized by prefixing
+   with `'`. Control characters are stripped. File size + row count
+   guards reject hostile/oversized inputs.
+
+6. **AI response schema validation (`services/elAI.ts`).** Validators
+   `validateAIPlan`, `validateInsights`, `validateElAction` are
+   applied to every `JSON.parse` of an LLM response. Validators check
+   types, allowed enum values, and numeric ranges (e.g. macro calories
+   500–10000, transaction amount 0–1M). Malformed responses return
+   `null` instead of being trusted.
+
+7. **AI prompt sanitization (`services/elAI.ts`).** The exported
+   `sanitizeForPrompt(s, max)` helper strips `EL_ACTION:` literals
+   (rewrites to `EL_ACT_:`) and ASCII control chars, then truncates.
+   It is applied to every user-controlled string injected into a
+   prompt: transaction descriptions, activity types, quick-capture
+   text, category-suggestion description.
+
+### Cross-cutting reminders
+
+- **Don't disable the security comments.** Each `SECURITY:` block in
+  source is load-bearing and references this doc.
+- **Don't move secrets back into AsyncStorage.** All credentials live
+  in `expo-secure-store` (`useOAuthProvider`, `useAI`, `useGoogleCalendar`).
+  AsyncStorage holds non-sensitive UI/data state only.
+- **Anthropic + OpenAI API calls send user data.** This is documented
+  for the upcoming privacy policy. Don't add new fields to the
+  `buildDynamicContext` / `services/elAI.ts` prompts without thinking
+  about whether the data should leave the device.
+
+### Why CSP keeps `'unsafe-inline'` for script-src
+
+The CSP meta tag in `index.html` allows `'unsafe-inline'` for both
+`script-src` and `style-src`. This is intentional and tied to El's
+single-file architecture: every script and style block lives inside
+`index.html`. Removing `'unsafe-inline'` would require either
+(a) adding a CSP nonce to every inline `<script>` (the file has many
+of them), or (b) extracting the inline JS to external files — which
+breaks the "no build step, no bundler" property the rest of the
+project depends on. The CSP still meaningfully reduces risk by:
+locking `connect-src` to just the four upstream APIs we actually
+call, blocking cross-origin scripts, blocking `<object>`/`<embed>`,
+and forbidding the page from being framed. Don't remove
+`'unsafe-inline'` casually; it would break boot. If you ever do
+extract a build step, drop `'unsafe-inline'` and switch to nonces.
+
+---
+
+## 🔒 2026-05-09 — Round-2 fixes (post-verification sweep)
+
+After the initial security pass, a second sweep was run to verify the
+fixes held and to find anything missed. All 13 round-1 fixes verified
+clean. Three new findings landed:
+
+1. **EL Native deep-link guard (`app/_layout.tsx`).** A `Linking.add
+   EventListener('url', ...)` listener is now mounted at the root
+   layout. `ALLOWED_DEEP_LINK_HOSTS` is a `Set` of the six OAuth
+   provider hostnames (`strava`, `fitbit`, `googlefit`, `whoop`,
+   `polar`, `garmin`). Any incoming deep link whose host is not on
+   that list is silently dropped (and logged in `__DEV__`). OAuth
+   callbacks normally never reach this listener — they're consumed
+   by `WebBrowser.openAuthSessionAsync` first — so the listener is
+   effectively a deny-by-default catch for unexpected deep links.
+   When you add a new OAuth provider, add its host to the Set.
+
+2. **EL Native AsyncStorage type sanitizer (`hooks/useElData.ts`).**
+   Added a `sanitizeStored(raw)` helper that runs BEFORE
+   `mergeWithDefaults` on every load from AsyncStorage. It enforces:
+   - root must be a plain object (not array, not null, not primitive),
+   - dangerous keys (`__proto__`, `constructor`, `prototype`) are
+     stripped at every nested level it inspects,
+   - arrays-where-arrays-expected are arrays (else `undefined`),
+   - objects-where-objects-expected are objects (else `undefined`).
+   Any structural mismatch upstream resolves to `DEFAULT_DATA`. This
+   protects against a corrupted or hostile-app-modified `el_data`
+   payload causing crashes or prototype pollution. It does NOT deeply
+   validate every leaf field — call sites already tolerate undefined.
+   When you add a new top-level `ElData` field, add it to
+   `sanitizeStored` too (else it'll be silently dropped on load).
+
+3. **CSP rationale documented above.** No code change — see the
+   "Why CSP keeps `'unsafe-inline'`" subsection.
+
+---
+
+## 🔒 2026-05-09 — Round-3 fixes (Codex audit response)
+
+Codex flagged 8 findings during a third pass. All addressed below.
+
+### EL Web (`El/El`)
+
+1. **AI replies are now escaped before HTML render.** New helper
+   `El.ai.safeMd(raw)` escapes all HTML, then re-introduces only
+   `**bold**` → `<b>` and `\n` → `<br>`. Wired into the three places
+   AI replies become `innerHTML`: chat respond (~line 6498), spending-
+   narrate (~line 5779), debt-vs-invest narrate (~line 5808). **Any
+   future AI-text-to-HTML path MUST use `safeMd` — never raw
+   `.replace(/\*\*.../, '<b>$1</b>')`.**
+
+2. **`addMsg('user', text)` now escapes through `safeMd`.** User-typed
+   chat input (and replayed history) used to render as raw innerHTML
+   — fixed. The `'ai'` branch keeps the raw-HTML path because every
+   caller either pre-runs through `safeMd` (real AI replies) or
+   builds trusted button HTML with explicit `esc()` on user fields
+   (confirm cards). Don't change the role check without auditing
+   every `addMsg('ai', …)` call site.
+
+3. **User-data fields wrapped in `El.escHtml(...)` at every render
+   site that builds `innerHTML`.** Sites covered this round:
+   - `${d.profile.name}` (home greeting)
+   - `${debt.name}` and `${debt.type}` (debts list)
+   - `${a.name}`, `${a.type}`, `${a.institution}` (accounts list)
+   - `${s.name}` (savings goals)
+   - `${s.name}` (income sources)
+   - `${e.title}`, `${e.notes}`, `${e.gcal_url}`, `${e.time}` (events,
+     both today's-events card and upcoming list)
+   - `${ex.name}` (active workout exercise blocks)
+   - `${e.name}` (food log items)
+   - `${wkt.name}` (workout templates)
+   - `${s.name}` (recent workout sessions)
+   - `${w.name}` (AI plan workout schedule)
+   - `${plan.rationale}` (AI plan rationale block)
+   - `${c.name}`, `${c.icon}` (budget category list)
+   Already-escaped sites (kept verified): `${El.escHtml(t.description)}`
+   in transaction list, `${El.escHtml(r.description)}` in recurring,
+   `${El.ai.escapeHtml(item.text)}` in financial plan items.
+   **New rule:** any user-controlled string in a template literal
+   that becomes `innerHTML` MUST be wrapped in `El.escHtml(...)`.
+   The canonical helper lives at line ~1573 in `index.html`.
+
+### EL Native (`ElNative`)
+
+4. **`useGoogleCalendar.ts` now matches `useOAuthProvider`.**
+   - `state` parameter generated via `generateState()`, included in
+     auth URL, validated on redirect with `safeCompare()`.
+   - Redirect URL must `startsWith(GCAL_REDIRECT_URI)` before any
+     code is extracted.
+   - `loadTokens` validates persisted JSON shape with `isValidTokens`
+     before returning.
+   - Token-exchange JSON shape is validated before persisting.
+   - Local helpers (`getUrlParam`, `safeCompare`, `isValidTokens`)
+     mirror the ones in `useOAuthProvider.ts`. If you ever centralize
+     them, do it for both at the same time.
+
+5. **`useOAuthProvider.loadTokens` now shape-validates persisted JSON
+   via `isValidPersistedTokens()`.** SecureStore returning corrupted
+   data (or a different version's schema) no longer crashes the hook;
+   the load resolves to `null` and the user is asked to reconnect.
+
+6. **`services/elAI.ts` prompt sanitization completed.**
+   `generateFitnessPlan` now runs `params.goal` and activity types
+   through `sanitizeForPrompt`. `getWeeklyInsights` now sanitizes
+   spending category names and Strava activity types. Combined with
+   the round-1 wrapping, every user/provider-controlled string that
+   reaches an LLM prompt is now sanitized.
+
+7. **Native JSON-import path runs `sanitizeStored` before saving.**
+   `app/(tabs)/settings.tsx` `handleImport` imports `sanitizeStored`
+   from `useElData` and uses it instead of trusting raw `JSON.parse`.
+   This was the only path that bypassed the AsyncStorage-load
+   sanitizer. **Rule:** any new code that loads `ElData`-shaped JSON
+   from outside the AsyncStorage path must run it through
+   `sanitizeStored` before passing to `saveData`.
+
+8. **Deep-link allow list now includes `googlecalendar`.**
+   `ALLOWED_DEEP_LINK_HOSTS` in `app/_layout.tsx` covers all seven
+   OAuth provider hostnames (strava, fitbit, googlefit,
+   googlecalendar, whoop, polar, garmin). The comment block now
+   also documents Expo Router behavior: file-based routing means
+   no in-app route can be reached via deep link unless a matching
+   file exists under `app/`. The `Linking.addEventListener` is
+   defense-in-depth for logging.
+
+---
+
+## 🔒 2026-05-09 — Round-4 fixes (Codex re-verification follow-up)
+
+Codex's second pass after Round-3 found native clean and three
+remaining web-side gaps. All addressed here.
+
+1. **More user-data fields wrapped in `El.escHtml(...)`.** Sites
+   added in Round-4: `${bill.name}` (Upcoming Bills card),
+   `${sub.name}` (subscription tracker), `${plan.goal}` (active
+   fitness goal), `${d.profile.name}` in Settings header card,
+   plus the input attribute values `value="${d.profile.name}"`
+   (Settings → Your Name) and `value="${d.settings?.aiApiKey||''}"`
+   (Settings → AI key). The attribute-injection cases matter
+   because `escHtml` escapes `"` so a user value containing a
+   quote can't break out of the value attribute.
+
+2. **Built-in fallback AI replies routed through `safeMd`.**
+   `respond()` now does
+   `this.addMsg('ai', this.safeMd(this.generateReply(text.toLowerCase())));`.
+   Without `safeMd`, the markdown-style string from `generateReply`
+   was rendered as raw HTML even though it interpolates user data
+   (debt names, savings, event titles, category names). The real-
+   AI reply path was already going through `safeMd`; this matches it.
+
+3. **`fmtBold` in `_renderOkToBuyOption` now delegates to `safeMd`.**
+   Was an inline copy of the same "escape → re-introduce `<b>`"
+   pattern. Convention check: grep `<b>\$1</b>` in `index.html`
+   should match exactly one line — the body of `safeMd`. Any new
+   markdown-render path uses `El.ai.safeMd`.
+
+### Pre-launch items still requiring user action
+
+- Compute and paste the SheetJS SRI hash into `EL_XLSX_SRI`. The
+  `curl … openssl` one-liner is in the comment above the constant.
+- (Optional) Run `npm audit` on `ElNative` and address any
+  HIGH/CRITICAL CVEs surfaced for `xlsx@^0.18.5`. Input limits +
+  `_safeMerge` already mitigate the parser-level prototype-pollution
+  class, but a CVE response is still cleaner.
+
+---
+
+## 🛠 2026-05-10 — Round-5 native UX polish
+
+Pre-test polish pass on the Expo project. None of these are security
+fixes — they're correctness/UX cleanups so the app is presentable for
+friends-and-family Expo Go testing.
+
+1. **Snapshot of net worth now has a chart.** New `NetWorthHistoryChart`
+   component in `app/(tabs)/finance.tsx` renders `data.netWorthHistory`
+   as a polyline sparkline (no `react-native-svg` dep — uses rotated
+   `View` segments with `transformOrigin: '0% 50%'`). Single-snapshot
+   state shows a hint instead of an empty chart. The 📸 button is no
+   longer write-only.
+
+2. **Income source UX hardening.** `useElData` now exports
+   `updateIncomeSource(src)`. Settings income list extracted into an
+   `IncomeSourceRow` component that owns its swipe ref. The
+   `IncomeModal` accepts an optional `initial: IncomeSource` for edit
+   mode, and shows a live annualization preview
+   (`MacroSanityCheck`-style) under the frequency chips so the next
+   user can't enter a monthly take-home and silently get an annualized
+   number 12× too big.
+
+3. **Macro sanity check.** New `MacroSanityCheck` component lives in
+   the Settings Nutrition Goals card. As the user types calories /
+   protein / carbs / fat, it shows `${P}P + ${C}C + ${F}F = X kcal vs
+   goal Y` colored green (within 10%), orange (10–25%), or red (>25%).
+   `handleSaveAll` now hard-rejects calorie targets outside 800–8000,
+   protein > 600 g, carbs > 1200 g, fat > 500 g. Drift > 25% prompts
+   "Macros don't match calories — save anyway?" override.
+
+4. **Profile + budget validation.** `handleSaveAll` rejects age
+   outside 1–120 and monthly budget outside 0–10,000,000. Previously
+   you could save age = 3000 with no complaint.
+
+5. **Full-swipe-to-delete consistency.** Five Finance Swipeable rows
+   (Transaction, Recurring, Debt, Savings goal, Plan item) and the
+   Income source row + Schedule Upcoming row + Today food row all
+   share the same pattern:
+   - `rightThreshold` set to `DELETE_SWIPE_THRESHOLD` (76 px) — or
+     equivalently named per-file constants — so a far-enough swipe
+     auto-commits.
+   - `onSwipeableOpen={(direction) => { if (direction === 'right') {
+     swipeRef.current?.close(); onDelete(); } }}` — single trigger
+     path. The row closes immediately so it doesn't sit half-open
+     behind the confirm Alert.
+   - The `renderRightActions` returns a non-interactive `<View>`
+     (NOT a `<Pressable>`). Two trigger paths cause double-fired
+     Alerts. Visual-only.
+   - **Convention:** every parent's `onDelete` prop must be a confirm
+     Alert (not a bare delete call). Five existing call sites already
+     wrap; the Transaction and Recurring sites at the parent in
+     `BudgetTab` / `RecurringTab` were silently deleting and were
+     wrapped in this round. The DebtCard call site was the same — also
+     wrapped in this round.
+   - `debtCard` style had `marginBottom: 12` baked in, which caused
+     the red Delete reveal to bleed into the gap between cards. Moved
+     the margin onto a new `debtCardWrap` outer `<View>`. SavingsGoal
+     uses the same style and gets the same wrapper.
+
+6. **Schedule layout + double-tap to add.**
+   - `CalendarGrid` extracted into its own component with a
+     `DOUBLE_TAP_MS = 300` window. Single tap selects the date;
+     two taps within 300 ms call `onAdd(dateStr)` to open the Add
+     Event sheet pre-filled with that date.
+   - Calendar cells now have a 1px transparent base border so the
+     today cell's blue border doesn't shift adjacent cells.
+   - Upcoming events extracted into `UpcomingRow` matching the
+     Finance gesture vocabulary. Synthetic events (recurring bills,
+     paydays) render without swipe — they aren't real records and
+     can't be deleted directly.
+   - Upcoming row text now has `numberOfLines={1}` + `minWidth: 0`
+     on the flex parent so long titles ellipsize instead of overflowing.
+
+7. **Income paydays projected onto the calendar.** `buildSyntheticPaydays`
+   in `app/(tabs)/schedule.tsx` mirrors `buildSyntheticBills`, seeded
+   from `IncomeSource.lastPayDate` and walking forward by frequency.
+   Yearly is skipped (too sparse). Both builders are now hardened —
+   see Round-7.
+
+8. **Nutrition Today rings + sparkline.**
+   - 4 macro rings shrunk from 76 → 62 px, stroke 9 → 7 px so they fit
+     comfortably on ~360 px screens. All inner texts have
+     `numberOfLines={1}`.
+   - Weight 30-day chart converted from a fake bar chart to a real
+     polyline sparkline (same rotated-View-segment trick as the net
+     worth chart).
+   - Today food items extracted into `FoodItemRow` with the standard
+     swipe pattern.
+
+9. **Home dashboard:** Net Worth card shows the `$assets − $liabilities`
+   breakdown line under the formula label.
+
+10. **Generic "activity sources" copy.** Fitness empty state mentions
+    Strava/Fitbit/Google Fit/Whoop/Polar/Garmin instead of just Strava.
+
+---
+
+## 🚨 2026-05-10 — Round-6 NTFS truncation incident + repair
+
+During Round-5, two source files were truncated mid-write by the
+NTFS mount:
+
+- `app/(tabs)/finance.tsx` — disk ended at byte 116556 mid-line at
+  `paddingVertical:` (no value, no closing brace).
+- `app/(tabs)/schedule.tsx` — disk ended at byte 26991 mid-line at
+  `flex: 1, backgroundColor:` (no value).
+
+Both repaired by reading the truncated bytes via a fresh Python
+`open()`, splicing in the canonical tail, and writing atomically:
+
+```python
+tmp = path + '.tmp'
+with open(tmp, 'wb') as f:
+    f.write(new_bytes)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp, path)
+```
+
+**Root cause hypothesis:** the IDE's Edit tool can succeed in its
+in-memory view while the disk write to the NTFS mount gets cut short.
+Subsequent Read calls return the in-memory view (looks fine);
+`npx tsc`, Metro, and `python3 open()` see the truncated disk view
+(crashes/parse errors).
+
+**Detection signal:** if `npx tsc` reports `Expression expected`
+mid-style at a column that lines up with a colon-no-value, or if
+Metro suddenly can't bundle a file you just edited, treat it as a
+truncation and verify with:
+
+```python
+with open(path, 'rb') as f: data = f.read()
+print(len(data), data[-50:])
+```
+
+If the file ends mid-line, repair via the splice+fsync pattern above.
+
+**Update to Critical Write Rules** (see also rules 5–7 below): after
+ANY substantial sequence of Edits on a file under the NTFS mount,
+verify the disk tail directly via Python `open()`, not via the file
+tool, before continuing.
+
+---
+
+## 🐛 2026-05-10 — Round-7 schedule crash root cause
+
+Independent of the file truncation, the Schedule tab had a real
+runtime bug in `advanceDate` (`schedule.tsx` line ~25). The function
+was:
+
+```ts
+function advanceDate(dateStr: string, freq: Frequency): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  if (freq === 'weekly') ...
+  return d.toISOString().slice(0, 10);
+}
+```
+
+Two crash modes:
+
+- If `dateStr` was malformed (or a stored `IncomeSource.lastPayDate` /
+  `RecurringExpense.nextDate` had drifted to a non-`YYYY-MM-DD`
+  shape), `new Date(...)` returned Invalid Date and `toISOString()`
+  threw `RangeError: Invalid time value`. That throw escaped the
+  `useMemo` callback in `ScheduleScreen` and crashed the tab.
+- If `freq` didn't match any of the four known values, `d` never
+  advanced and the **emit loop** in `buildSyntheticBills` /
+  `buildSyntheticPaydays` had no safety counter — infinite loop on
+  render, app freeze, native crash.
+
+**Fix:** `advanceDate` now returns `string | null`. Returns `null`
+on:
+- Non-`YYYY-MM-DD` input
+- Invalid Date after parse
+- Unknown frequency
+- Invalid Date after the per-freq mutation
+
+Both builders treat `null` as "stop iterating" and `continue` the
+outer source loop. Both emit loops now have a hard cap of 60
+emissions per source so an unforeseen no-advance bug can never
+infinite-loop.
+
+**Rule for new synthetic projectors:** every `while (date <= bound)`
+that advances a date MUST have BOTH a null check on the advance
+result AND a numeric emission cap. Don't trust the bound alone.
 
 El is a **single HTML file** (~8,458 lines as of v20). All app logic, styles, and markup live in `index.html`. There is no build step, no bundler, no separate JS/CSS files.
 
@@ -24,6 +541,116 @@ El is a **single HTML file** (~8,458 lines as of v20). All app logic, styles, an
 | `El.strava` | OAuth flow, token exchange, activity sync, macro adjustment |
 
 **Build string:** A `BUILD` constant in `index.html` and the cache name in `sw.js` must always match. Bump both when shipping a release — mismatches leave stale service-worker caches on devices.
+
+---
+
+## 🛠 2026-05-10 — Round-8 native UX polish + AI-validator catch-up
+
+Round dedicated to (a) closing AI-validator gaps Codex's audit found,
+(b) the user-requested "swipe a synthetic event → manage source"
+chooser in Schedule, and (c) several smaller UX wins.
+
+### AI-validator catch-up
+
+1. **`services/elAI.ts` `quickCapture` and `answerWithActions` now go
+   through `validateElAction`.** Both had drifted back to raw
+   `JSON.parse(...) as ElAction` casts during a Codex-driven session.
+   Re-wired so every AI-emitted action JSON passes the same schema
+   guard before reaching `confirmAdd` UI. Convention reinforced:
+   **every JSON.parse on an LLM response MUST go through the matching
+   `validate*` function.** No exceptions.
+
+2. **`app/(tabs)/nutrition.tsx` `scanFoodWithClaude`** — the Claude
+   Vision food / nutrition-label scanner. Now per-field validates the
+   AI response before returning. Caps name at 200 chars, calories
+   0–10000, protein 0–600 g, carbs 0–1200 g, fat 0–500 g. Out-of-bound
+   fields are dropped (the rest of the response is kept as a partial).
+
+3. **`app/(tabs)/finance.tsx` `scanReceiptWithClaude`** — Claude Vision
+   receipt scanner. Same pattern: validates description (200), category
+   (60), type (`'expense' | 'income'`), date (`YYYY-MM-DD` regex), and
+   amount (finite, 0–1M, rounded to cents). Drops bad fields silently.
+
+### Synthetic event delete chooser (the user-asked-for piece)
+
+4. **`RecurringExpense` interface gained `skippedDates?: string[]`.**
+   Stores per-occurrence skip dates so the user can hide a single
+   projected bill without disrupting the source's `nextDate`.
+   `buildSyntheticBills` filters these dates out of future projections
+   automatically. Empty/undefined → no skips (default).
+
+5. **`useElData` exposes `skipRecurringInstance(id, dateStr)`.** Adds
+   the date to the source's `skippedDates` (deduped via `Set`) and
+   persists. Pure data action — no UI logic.
+
+6. **`DisplayEvent` in `schedule.tsx` carries `synthetic?`,
+   `syntheticKind?: 'recurring' | 'payday'`, `sourceId?: string`.**
+   Synthetic builders fill these so the UI can target the right action.
+   These fields are ALL produced by in-app builders — never from user
+   or AI input — so no validator needed; trust by construction.
+
+7. **`UpcomingRow` now offers a chooser, not an info dump.**
+   - Real event swipe → confirm Alert → delete.
+   - Synthetic recurring swipe → "Skip just this one" / "Delete
+     recurring item" / "Cancel". Skip writes to `skippedDates`; delete
+     calls `deleteRecurring`.
+   - Synthetic payday swipe → "Delete income source" / "Cancel" (no
+     per-instance skip; income paydays don't have a stable per-date
+     concept).
+   - Long-press shows the same options plus "Add to Google Calendar"
+     when GCal is connected.
+   - **Cross-tab consistency:** since both Schedule (Upcoming) and
+     Finance (Recurring tab) read the same `data.recurring` state,
+     deleting a recurring item from Schedule reflects on the Recurring
+     tab automatically — no navigation required.
+
+### Other UX wins this round
+
+8. **Schedule Add Event modal: keyboard dismisses on tap-outside.**
+   Outer overlay is now a `<Pressable onPress={Keyboard.dismiss}>`.
+   Inputs inside the sheet still work; the modal's dimmed area becomes
+   a soft "tap to close keyboard" target.
+
+9. **Schedule day view: empty state is now an inline add button.**
+   "No events this day. Tap to add one." — tappable, opens the Add
+   Event sheet pre-filled with the selected date.
+
+### Security catch from this round's audit
+
+10. **`sanitizeStored` now validates `skippedDates` per-item.** A
+    corrupted or hostile-stored recurring item with non-string members
+    in `skippedDates` would have passed through cleanly into the
+    runtime Set lookup. Members are now filtered to `YYYY-MM-DD`
+    strings only; bad entries are dropped silently.
+
+### Truncations repaired this round
+
+Multiple files truncated mid-Edit again, all repaired via the splice
++ fsync + `os.replace` pattern:
+- `services/elAI.ts` (twice — both validator wires)
+- `app/(tabs)/finance.tsx` (StyleSheet tail)
+- `app/(tabs)/nutrition.tsx` (StyleSheet tail)
+- `app/(tabs)/schedule.tsx` (twice — Cards style block, then Modal
+  style block)
+- `hooks/useElData.ts` (twice — context value provider object)
+
+This is now a recurring pain point. **Critical Write Rule #8 stands
+and is being followed:** after every substantial edit run on this
+tree, verify the disk tail with Python `open()` not the file tool.
+The truncations would otherwise have shipped to Eddie as silent app
+crashes.
+
+### Pre-share status after Round-8
+
+- TypeScript compiles clean across all source files.
+- All 12 critical files end with `});` / `}` and have balanced
+  braces+parens.
+- Zero new security blockers from the post-round audit.
+- One MEDIUM finding (chat history `JSON.parse` in `ai.tsx` lacks
+  shape validation) deferred — already has try/catch fallback, low
+  exploitability.
+- One LOW finding (Strava credentials JSON.parse in `settings.tsx`
+  has minimal validation) deferred — same reasoning.
 
 ---
 
@@ -57,6 +684,50 @@ These rules exist because of real data-loss incidents in prior sessions:
    with open('index.html', 'a') as f: os.fsync(f.fileno())
    "
    ```
+
+5. **Don't trust `wc -l` / `tail -1` from bash immediately after a
+   Read/Write/Edit on `index.html`.** The NTFS mount returns a stale
+   metadata view for several seconds — bash will report the file is
+   shorter than it actually is and "tail -1" will show the wrong
+   final line. After any edit, verify line count and end-of-file by
+   reading the file with the file tool (or wait + `sync` + retry
+   bash). Multiple times this pass, bash said the file was 8539 lines
+   ending mid-`fetch(...)` while the file tool correctly showed 8720
+   lines ending in `</html>`. Trust the file tool.
+
+6. **Anything concatenated into the AI system prompt MUST go through
+   `_safe(s, max)` in `buildDynamicContext`.** That helper neutralizes
+   `[[EL_ACTION:` injection, strips control chars, and caps length.
+   New context fields are the most common source of prompt-injection
+   regressions — wrap them at the point of concat, not later.
+
+7. **Anything merged from untrusted parsed data (XLSX, CSV, imported
+   JSON) MUST use the `_safeMerge(...)` helper, never `Object.assign(
+   {}, target, parsed)` directly.** `_safeMerge` drops `__proto__`,
+   `constructor`, `prototype` keys to block prototype pollution.
+   Defined locally in `_showXLSXPreview`; copy the same pattern into
+   any new import path.
+
+8. **Edit-tool writes to the NTFS mount can silently truncate.** The
+   Edit tool's in-memory view can return success while the disk write
+   gets cut mid-stream. Symptoms: `npx tsc` reports `TS1109: Expression
+   expected` at a column that aligns with a colon-no-value mid-style;
+   Metro fails to bundle a file you just edited; `python3 open()` and
+   bash `tail` show a truncated tail while the file tool's `Read` shows
+   complete content. **After any substantial edit run on the ElNative
+   tree, verify the disk tail with `python3 -c "open(p,'rb').read()[-50:]"`
+   not via the file tool.** If truncated, repair via the splice + fsync +
+   `os.replace` pattern documented in the 2026-05-10 Round-6 section.
+
+9. **Synthetic-event date projectors require a null-safe advance + hard
+   emission cap.** Any `while (date <= bound)` loop that walks a date
+   forward MUST: (a) treat the advance function as returning `string |
+   null` and `break`/`continue` on null, AND (b) cap the per-source
+   emission count numerically. Don't rely on the bound check alone —
+   if the advance is a no-op (unknown frequency, NaN date), the loop
+   will infinite-loop the entire app. See `advanceDate` /
+   `buildSyntheticBills` / `buildSyntheticPaydays` in
+   `app/(tabs)/schedule.tsx` for the canonical implementation.
 
 ---
 
@@ -148,6 +819,18 @@ const ws = _findSheet(wb, 'El Import - Workouts', 'Import Workouts');
 **Location:** `C:\Users\Lap top\Downloads\ElNative`
 
 **Framework:** Expo SDK 54, expo-router file-based routing, TypeScript.
+
+### Repository Status
+
+`ElNative` is currently a local-only Expo Go test project. It does not
+have a GitHub remote/origin configured yet, and that is expected. Local
+commits are useful for rollback/history, but do not tell the user to run
+`git push origin master` for `ElNative` unless a GitHub repository has
+first been created and added as a remote.
+
+Expo Go testing does not require GitHub. Use local commits plus
+`npx expo start` until the project is ready for backup, collaboration,
+EAS builds, or App Store / Play Store work.
 
 ### Data Layer
 
@@ -251,3 +934,193 @@ Then retry the git command.
 | Commit | Description | Lines |
 |---|---|---|
 | `8a670c2` | feat: activity macros toggle, Strava OAuth (v19+v20) | 8,458 |
+
+---
+
+## 📱 2026-05-09 — ElNative feature parity complete (78/78)
+
+All features from the El PWA have been shipped in ElNative. Beyond strict parity, four new native-only features were added:
+
+- **Receipt scanner** — 📷 button in Add Transaction modal; picks image via `expo-image-picker`, sends base64 to Claude Haiku vision API, auto-fills amount/merchant/date/category.
+- **Voice input (Whisper STT)** — 🎙 push-to-talk on AI Chat and Quick Capture; records via `expo-av`, transcribes via OpenAI Whisper API (`/v1/audio/transcriptions`). Requires separate OpenAI API key stored as `el_whisper_key` in SecureStore. See backlog for planned migration to native platform STT.
+- **Spreadsheet import** — 📂 document picker for `.xlsx`/`.csv`; parsed with `xlsx` npm package; visual column-mapping UI (date/amount/description/category/type/skip); adds rows as transactions.
+- **Google Calendar OAuth** — Settings → Google Calendar; PKCE + state OAuth flow; 📅 button per event in Schedule sends event to Google Calendar API.
+
+### New/changed files in this pass
+
+| File | Change |
+|---|---|
+| `hooks/useVoiceInput.ts` | Created — expo-av recording + Whisper transcription |
+| `hooks/useGoogleCalendar.ts` | Created — GCal OAuth (PKCE + state) + event POST |
+| `app/(tabs)/ai.tsx` | Full rewrite — ActionCard system, voice mic, useLocalSearchParams pre-fill |
+| `app/(tabs)/finance.tsx` | Receipt scanner in TransactionModal; SpendingChart; CategoryDrilldownModal; Swipeable delete; SubscriptionTracker; JobLossSimCalc; EmergencyImpactCalc |
+| `app/(tabs)/index.tsx` | Last Month Recap card; voice mic on QuickCaptureCard |
+| `app/(tabs)/schedule.tsx` | Synthetic bill injection; GCal 📅 button per event |
+| `app/(tabs)/settings.tsx` | Voice key section; GCal connect section; Spreadsheet import modal |
+| `app/(tabs)/fitness.tsx` | Schedule workout → adds to calendar |
+
+---
+
+## 🔒 2026-05-09 — API key security model
+
+### Can a user trick El into revealing the API key?
+
+**Short answer: No, for the native app.**
+
+In ElNative the Anthropic key (`el_anthropic_key`) and Whisper key (`el_whisper_key`) are stored in `expo-secure-store` (iOS Keychain / Android Keystore). They are retrieved immediately before an API call and placed in an HTTP `Authorization` / `x-api-key` header. They are **never** injected into any prompt string, never stored in AsyncStorage, and never appear in any chat message or AI response. Claude has no access to the key — it's opaque HTTP metadata by the time it reaches the API. Prompt injection cannot extract something that was never in the prompt.
+
+The only realistic extraction vectors are:
+1. **Jailbroken device** — hardware-backed storage can be bypassed on compromised devices. Acceptable risk for a personal app; backend proxy eliminates it for a public release.
+2. **HTTPS interception (MITM)** — attacker would need the user to trust a malicious root certificate. Network traffic is all HTTPS; no `http://` endpoints exist.
+3. **Malicious code in the app bundle** — not a concern for a personal build; would require a supply-chain attack.
+
+**For the PWA** (`localStorage`): any JS running on the same origin could read `el_data` and the key. The CSP restricts what scripts can load, but `'unsafe-inline'` is required due to the single-file architecture. Acceptable for personal use; a public release should either use a backend proxy or store the key in a `httpOnly` cookie (which requires a server).
+
+**Rule going forward:** the key must never appear in:
+- Any string passed to `messages[].content`
+- Any `console.log` / `Alert.alert` / UI render
+- Any JSON export (`exportData` already strips `SECRET_KEYS` — keep that list updated)
+
+---
+
+## 📋 Backlog (pre-App Store items)
+
+These are known gaps deferred for the EAS build / App Store phase. Do not start them in Expo Go.
+
+### 1. Backend proxy for AI key (required for public release)
+**Problem:** BYOK (bring-your-own-key) requires users to have Anthropic accounts, which is not realistic for a general audience. Showing raw `sk-ant-...` input fields also looks suspicious.
+**Solution:** A lightweight proxy (Cloudflare Worker or Vercel Edge Function) that holds Eddie's Anthropic key server-side. The app calls `https://el-api.eddietorresi.com/chat` (or similar); the proxy forwards to `api.anthropic.com` with the real key. Users see no key input.
+**Scope:** ~50 lines of Cloudflare Worker JS + one DNS record. Settings → AI section becomes "AI is built-in" with no key field.
+**Prerequisite:** EAS build (custom domain needs to be allowlisted in `app.json` CSP equivalent for native fetch).
+
+### 2. Native platform STT for voice input (replaces Whisper)
+**Problem:** Whisper requires a separate OpenAI API key. On-device iOS/Android STT is free and requires no external account.
+**Solution:** Replace `hooks/useVoiceInput.ts` with `@react-native-voice/voice`. This package wraps iOS `SFSpeechRecognizer` and Android `SpeechRecognizer` — both free, on-device (or Apple/Google cloud, user's choice via device settings).
+**Scope:** Replace the hook, remove `el_whisper_key` from SecureStore, remove Voice Input section from Settings, remove `expo-av` if no other audio use.
+**Prerequisite:** EAS custom dev build (native module; not available in Expo Go managed workflow).
+
+### 3. EAS build + App Store submission
+- Apple Developer account ($99/yr) required
+- `eas.json` config (no secrets inline — use EAS Secrets dashboard)
+- Privacy policy needed: app sends transaction descriptions, workout data, and macro logs to Anthropic API. Note this explicitly.
+- `NSUsageDescription` strings already in `app.json` (camera, photo library, microphone)
+- `android.allowBackup: false` already set
+- Garmin developer access: submit application early (approval takes days)
+
+### 4. SheetJS SRI hash for PWA
+Run the one-liner in the `🔒 2026-05-09 Round-1` section above and paste the hash into `EL_XLSX_SRI` in `index.html` before public launch.
+
+---
+
+## 💰 2026-05-09 — AI cost optimization (local-first design)
+
+ElNative is designed to use as few API calls as possible. Eddie / the El team will bear hosting costs for a public release, so every unnecessary AI call is real money. The three highest-call-volume functions have been made **local-first**.
+
+### services/categorizer.ts (NEW FILE)
+
+A pure TypeScript merchant/keyword lookup table with no imports and no async work. `categorizeLocally(description)` returns `{ category, confidence }`. Confidence ≥ 0.75 means skip Claude.
+
+**Coverage:** ~200 named merchants (Starbucks, Netflix, Uber, Amazon, etc.) at confidence 0.95, plus keyword rules (restaurant, gym, streaming, etc.) at confidence 0.80. Unknown descriptions return confidence 0.10 → fall through to Haiku.
+
+**Rule:** When adding a new feature that categorizes transactions, call `categorizeLocally` first. Only call `categorizeTxn()` in elAI.ts if the result falls below `CATEGORIZER_THRESHOLD`.
+
+### services/elAI.ts — local-first changes
+
+#### categorizeTxn()
+Now calls `categorizeLocally(description)` first. If confidence ≥ 0.75, returns the local result with no API call. Known merchants (the majority of daily transactions) are free. Claude Haiku is only used for ambiguous strings like "Misc payment #3847" or "AMZN*RT5HBQ."
+
+#### quickCapture()
+A new `localCapture(text)` function handles clear-cut inputs via regex before touching the API:
+- Any input with a `$XX.XX` amount → transaction (expense or income based on keywords like "salary", "refund"). Category comes from `categorizeLocally`.
+- "remind me to X" or "don't forget Y" → reminder
+- Event keyword (dentist, meeting, flight, birthday…) + explicit day/time → event
+
+Only ambiguous inputs (e.g. "go for a run", "how are my finances") fall through to Claude Haiku. Typical user captures ("$45 groceries", "dentist Thu 2pm", "remind me to pay rent Monday") cost $0.
+
+**Supported date resolution (local):** today, tomorrow, next week, Mon–Sun (full + 3-letter abbreviations), ISO `YYYY-MM-DD`.
+**Supported time resolution (local):** 12-hour (`2pm`, `9:30am`) and 24-hour (`14:00`).
+
+#### getWeeklyInsights()
+Results are cached in AsyncStorage under `el_weekly_insights_cache` for **24 hours**, keyed by a data fingerprint (transaction count + total spending + workout count + nutrition days + Strava activity count for the current week). Tapping "Refresh" on unchanged data returns the cached result instantly. Only a meaningful data change (new transaction, new workout, etc.) or a 24-hour expiry triggers a Sonnet call.
+
+**Cache read/write failures are non-fatal** — both wrapped in try/catch; the function falls through to a live API call.
+
+### What still always calls Claude
+
+| Function | Model | Why always AI |
+|---|---|---|
+| `generateFitnessPlan` | Sonnet | Complex structured output; no local equivalent |
+| `answerHealthQuery` | Sonnet | Open-ended Q&A; requires reasoning over user data |
+| `answerWithActions` | Sonnet | Open-ended Q&A + action detection |
+| `quickCapture` (fallback) | Haiku | Ambiguous inputs with no clear local parse |
+| `categorizeTxn` (fallback) | Haiku | Unknown merchant strings |
+
+### What never calls Claude (after this pass)
+
+- Categorizing "Starbucks", "Netflix", "Uber", "Whole Foods", "Shell", and ~200 other named merchants
+- Categorizing any description matching keyword rules (restaurant, gym, streaming, pharmacy, etc.)
+- Quick captures with an explicit dollar amount ("$45 groceries", "paid rent $1200")
+- Quick captures with explicit event language + a day/time ("dentist Thu 2pm")
+- Explicit reminder language ("remind me to call dentist Monday")
+- Weekly insights within 24 hours of a previous generation on unchanged data
+
+---
+
+## 📱 2026-05-09 — ElNative session: tracker import, Strava → Settings, edit flows, food scanner, health score fix
+
+### 1. Financial Tracker XLSX import (`app/(tabs)/settings.tsx`)
+
+`parseFinancialTracker(wb, existing)` — a full TypeScript port of the web version's `_mapTrackerToElData`. Detects tracker workbooks via `isTrackerWorkbook(wb)` (looks for "Dashboard" sheet, or Debts + Expenses combination). Reads the following sheets:
+
+- **Dashboard** → `incomeSources`, `budget.monthly`
+- **Debts** → `debts`
+- **Expenses** → `recurring` categories + items. **IMPORTANT:** category is stored by name string, not ID. `category: catName` — never `category: catMap[key].id`.
+- **Net Worth** → `savings`, `accounts`
+- **Notes & Goals** → `plan` items
+- **El Import - Workouts** → `workouts.templates`
+- **El Import - Macros** → `macros.goals`
+
+Imported recurring items have `nextDate` set to the 1st of next month (never empty string — an empty `nextDate` causes "Date value out of bounds" crash in `schedule.tsx`'s `buildSyntheticBills`).
+
+**Per-section import toggles:** the confirm screen shows one Switch per detected section. Only sections with actual data are pre-shown. User can disable any section before importing. Only enabled sections are merged into existing data.
+
+**`schedule.tsx` crash guard:** `buildSyntheticBills` now has `if (!exp.nextDate) continue;` to skip any recurring item without a scheduled date.
+
+### 2. Strava connect moved to Settings
+
+All Strava credential input (Client ID, Client Secret) and the OAuth connect/disconnect flow now live in **Settings → Strava** section. The Fitness tab no longer contains `StravaConnectPanel` or any SecureStore credential handling. When Strava is not connected, the Fitness → Activities tab shows a redirect message pointing to Settings.
+
+### 3. Fitness tab: "Strava" sub-tab renamed to "Activities"
+
+`fitness.tsx`: tab state type changed from `'Workouts' | 'Strava'` to `'Workouts' | 'Activities'`. All `tab === 'Strava'` comparisons updated to `'Activities'`. The `options` array updated to `['Workouts', 'Activities']`.
+
+### 4. Recurring items edit (`app/(tabs)/finance.tsx`)
+
+- `RecurringRow` now accepts an `onEdit` prop and supports long-press → Alert with Edit/Delete options.
+- Category display resolves by both name and ID: `categories.find(c => c.name === item.category || c.id === item.category)` — handles both manually-added and tracker-imported items.
+- `AddRecurringModal` accepts an `initial?: RecurringExpense | null` prop. A `useEffect` pre-fills all form fields when `initial` is set. Title shows "Edit Recurring" vs "Add Recurring".
+- `BudgetTab` wires up `updateRecurring` and an `editingRecurring` state; the modal's `onSave` uses `updateRecurring` when editing.
+
+### 5. Debt edit discoverability (`app/(tabs)/finance.tsx`)
+
+- `DebtCard` now shows explicit **Edit** and **Delete** buttons at the bottom of each card instead of relying solely on undiscoverable long-press.
+- `handleSave` in `DebtsTab` preserves `originalBalance` by spreading `editingDebt` first: `{ ...editingDebt, ...debt, id: editingDebt.id }`.
+- New debt save correctly sets `originalBalance: parseFloat(form.balance)`.
+
+### 6. Food/recipe scanner (`app/(tabs)/nutrition.tsx`)
+
+`scanFoodWithClaude(base64, mediaType)` — Claude Haiku vision call that returns `{ name, calories, protein, carbs, fat }`. `AddFoodModal` has a **📷 Scan Label or Meal** button above the food name field. Tapping shows a Camera/Library picker (via `expo-image-picker`), encodes the image, calls the scanner, and auto-fills the form fields.
+
+### 7. Financial Health score fallback (`app/(tabs)/index.tsx`)
+
+`computeHealthScore` previously received `income` derived solely from this month's income transactions. After a fresh tracker import with no logged transactions, `income = 0`, causing misleading 0% scores.
+
+**Fix:** before calling `computeHealthScore`, an `estimatedFromSources` value is computed from `data.incomeSources` using frequency multipliers (`weekly: 52/12`, `biweekly: 26/12`, `monthly: 1`, `yearly: 1/12`). `effectiveIncome = income > 0 ? income : estimatedFromSources` is passed to `computeHealthScore`. Transaction-logged income still takes priority when available.
+
+### Codex checklist additions for this session
+
+- When adding a new recurring item import path: always set `nextDate` to a valid ISO date string (never `''`).
+- When storing recurring expense category from tracker: use category name, not ID.
+- When adding new income source frequency types to `incomeSources`: add the corresponding multiplier key in the `index.tsx` health score `estimatedFromSources` computation.
+
+---

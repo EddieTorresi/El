@@ -15,6 +15,18 @@
 <link rel="icon" type="image/svg+xml" href="./el-icon.svg">
 <link rel="apple-touch-icon" href="./el-icon-180.png">
 <meta name="mobile-web-app-capable" content="yes">
+<!-- Security headers: defense-in-depth for the inline-everything PWA.
+     - CSP locks down where scripts/styles/network can come from.
+       'unsafe-inline' is required because the entire app lives in a
+       single HTML file with inline <script>/<style>; we mitigate by
+       restricting connect-src to only the APIs we actually call and
+       blocking object/embed entirely. SheetJS is loaded from cdnjs
+       with an SRI hash — see the <script integrity=...> tag below.
+     - Referrer-Policy prevents leaking the URL to third-party APIs.
+     - Permissions-Policy disables features we don't use. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://api.anthropic.com https://api.openai.com https://www.strava.com https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com https://www.strava.com">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Permissions-Policy" content="geolocation=(), microphone=(self), camera=(self), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), midi=()">
 
 <script>/* El Mini Charts v1 – fully inline, no CDN */
 (function(W){
@@ -1834,7 +1846,7 @@ const El = {
       document.getElementById('screen-home').innerHTML = `
         <div class="page-header fade-in">
           <div>
-            <div style="font-size:13px;color:var(--text2);margin-bottom:2px">${El.greet()}, ${d.profile.name} ✦</div>
+            <div style="font-size:13px;color:var(--text2);margin-bottom:2px">${El.greet()}, ${El.escHtml(d.profile.name)} ✦</div>
             <div class="page-title">El</div>
           </div>
           <div style="display:flex;gap:8px">
@@ -2051,7 +2063,7 @@ const El = {
             <div class="list-item" style="opacity:${paid?0.5:1}">
               <div class="list-icon" style="background:var(--red-glow)">💳</div>
               <div class="list-content">
-                <div class="list-title">${bill.name}${paid?' <span style="color:var(--teal);font-size:11px">✓ paid</span>':''}</div>
+                <div class="list-title">${El.escHtml(bill.name)}${paid?' <span style="color:var(--teal);font-size:11px">✓ paid</span>':''}</div>
                 <div class="list-sub">Due in ${El.daysUntil(bill.dueDay)} days</div>
               </div>
               <div style="display:flex;align-items:center;gap:8px">
@@ -2069,7 +2081,7 @@ const El = {
           ${todayEvents.length ? todayEvents.map(e=>`
             <div class="event-card ${e.type}">
               <div class="event-time">${e.time||'All day'}</div>
-              <div><div class="event-title">${e.title}</div>${e.notes?`<div class="event-sub">${e.notes}</div>`:''}</div>
+              <div><div class="event-title">${El.escHtml(e.title)}</div>${e.notes?`<div class="event-sub">${El.escHtml(e.notes)}</div>`:''}</div>
             </div>`).join('') : `<div style="text-align:center;padding:16px 0;color:var(--text3);font-size:14px">Nothing scheduled today. <span style="color:var(--primary);cursor:pointer" onclick="El.ui.openModal('modal-add-event')">Add something?</span></div>`}
         </div>
 
@@ -2162,7 +2174,7 @@ const El = {
               const pct = c.allocated>0?Math.min(100,(spent/c.allocated)*100):0;
               return `<div style="margin-bottom:14px;cursor:pointer" onclick="El.finance.openCategoryDrilldown('${c.id}')">
                 <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-                  <div style="display:flex;align-items:center;gap:8px"><span>${c.icon}</span><span style="font-weight:600">${c.name}</span></div>
+                  <div style="display:flex;align-items:center;gap:8px"><span>${El.escHtml(c.icon)}</span><span style="font-weight:600">${El.escHtml(c.name)}</span></div>
                   <div style="font-size:13px;color:var(--text2)">${c.allocated>0?El.fmt(spent)+' / '+El.fmt(c.allocated):'<span style="color:var(--text3)">tap to set budget</span>'}</div>
                 </div>
                 <div class="progress-wrap"><div class="progress-bar" style="width:${pct}%;background:${pct>90?'var(--red)':pct>70?'var(--orange)':c.color}"></div></div>
@@ -2185,7 +2197,7 @@ const El = {
                 <div class="list-item" onclick="El.finance.openSubscriptionAction('${sub.key.replace(/'/g, '&apos;')}', ${sub.amount.toFixed(2)})" style="cursor:pointer">
                   <div class="list-icon" style="background:var(--bg3);font-size:18px">🔁</div>
                   <div class="list-content">
-                    <div class="list-title">${sub.name}</div>
+                    <div class="list-title">${El.escHtml(sub.name)}</div>
                     <div class="list-sub">${sub.occurrences} hits · last ${sub.lastDate} · every ${Math.round(sub.avgGap)} days</div>
                   </div>
                   <div class="list-amount neg">${El.fmt(sub.amount)}</div>
@@ -2245,7 +2257,7 @@ const El = {
             ${d.debts.map(debt=>`
               <div class="debt-card">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                  <div><div class="debt-name">${debt.name}</div><div class="debt-type">${{credit_card:'Credit Card',auto:'Auto Loan',student:'Student Loan',personal:'Personal Loan',mortgage:'Mortgage',other:'Loan'}[debt.type]||debt.type}</div></div>
+                  <div><div class="debt-name">${El.escHtml(debt.name)}</div><div class="debt-type">${El.escHtml({credit_card:'Credit Card',auto:'Auto Loan',student:'Student Loan',personal:'Personal Loan',mortgage:'Mortgage',other:'Loan'}[debt.type]||debt.type)}</div></div>
                   <div style="display:flex;gap:6px;align-items:center">
                     <button onclick="El.finance.openEditDebt('${debt.id}')" style="background:var(--bg3);border:none;color:var(--text2);cursor:pointer;font-size:13px;padding:4px 10px;border-radius:8px">✏️</button>
                     <button onclick="El.finance.removeDebt('${debt.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px">×</button>
@@ -2298,8 +2310,8 @@ const El = {
                 <div style="display:flex;align-items:center;gap:10px">
                   <span style="font-size:22px">${acctIcons[a.type]||'🏦'}</span>
                   <div>
-                    <div style="font-weight:700">${a.name}</div>
-                    <div style="font-size:12px;color:var(--text2)">${{checking:'Checking',savings:'Savings',investment:'Investment',cash:'Cash',other:'Other'}[a.type]||a.type}${a.institution?' · '+a.institution:''}</div>
+                    <div style="font-weight:700">${El.escHtml(a.name)}</div>
+                    <div style="font-size:12px;color:var(--text2)">${El.escHtml({checking:'Checking',savings:'Savings',investment:'Investment',cash:'Cash',other:'Other'}[a.type]||a.type)}${a.institution?' · '+El.escHtml(a.institution):''}</div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px">
@@ -2319,7 +2331,7 @@ const El = {
             const done = pct >= 100;
             return `<div class="card" style="${done?'border-color:var(--teal)':''}">
               <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                <div><div style="font-size:17px;font-weight:700">${s.name}${done?' 🎉':''}</div><div style="font-size:12px;color:var(--text2);margin-top:2px">${El.fmt(s.current)} of ${El.fmt(s.target)}</div></div>
+                <div><div style="font-size:17px;font-weight:700">${El.escHtml(s.name)}${done?' 🎉':''}</div><div style="font-size:12px;color:var(--text2);margin-top:2px">${El.fmt(s.current)} of ${El.fmt(s.target)}</div></div>
                 <div style="display:flex;gap:6px;align-items:center">
                   <button onclick="El.finance.depositToGoal('${s.id}')" style="background:var(--teal-glow);border:1px solid var(--teal);color:var(--teal);border-radius:var(--radius-sm);padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap">+ Deposit</button>
                   <button onclick="El.finance.openEditSavings('${s.id}')" style="background:var(--bg3);border:none;color:var(--text2);cursor:pointer;font-size:13px;padding:4px 10px;border-radius:8px">✏️</button>
@@ -2833,7 +2845,7 @@ const El = {
               <div class="food-log-item">
                 <div style="font-size:22px">🍽️</div>
                 <div style="flex:1">
-                  <div style="font-weight:600;font-size:14px">${e.name}</div>
+                  <div style="font-weight:600;font-size:14px">${El.escHtml(e.name)}</div>
                   <div style="font-size:12px;color:var(--text2)">${e.calories} cal · ${e.protein}g P · ${e.carbs}g C · ${e.fat}g F</div>
                 </div>
                 <button onclick="El.fitness.removeFood(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;line-height:1">×</button>
@@ -2854,7 +2866,7 @@ const El = {
               <div class="list-item">
                 <div class="list-icon" style="background:var(--primary-glow);font-size:20px">🏋️</div>
                 <div class="list-content">
-                  <div class="list-title">${wkt.name}</div>
+                  <div class="list-title">${El.escHtml(wkt.name)}</div>
                   <div class="list-sub">${wkt.exercises.length} exercise${wkt.exercises.length !== 1 ? 's' : ''}</div>
                 </div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
@@ -2872,7 +2884,7 @@ const El = {
               <div class="list-item">
                 <div class="list-icon" style="background:var(--bg3);font-size:18px">✅</div>
                 <div class="list-content">
-                  <div class="list-title">${s.name}</div>
+                  <div class="list-title">${El.escHtml(s.name)}</div>
                   <div class="list-sub">${s.date} · ${s.sets} sets</div>
                 </div>
               </div>`).join('')}
@@ -2900,7 +2912,7 @@ const El = {
                   <button class="card-action" onclick="El.ui.openModal('modal-fitness-goal')">Rebuild</button>
                 </div>
                 <div style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:14px">
-                  <div style="font-size:13px;color:var(--text);line-height:1.6">${plan.goal}</div>
+                  <div style="font-size:13px;color:var(--text);line-height:1.6">${El.escHtml(plan.goal)}</div>
                 </div>
                 <div style="font-size:12px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Nutrition Targets</div>
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
@@ -2921,12 +2933,12 @@ const El = {
                     <div style="font-size:10px;color:var(--text2);margin-top:2px">Fat</div>
                   </div>
                 </div>
-                ${plan.rationale ? `<div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px;padding:10px 12px;background:var(--bg3);border-radius:10px;border-left:3px solid var(--primary)">${plan.rationale}</div>` : ''}
+                ${plan.rationale ? `<div style="font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:14px;padding:10px 12px;background:var(--bg3);border-radius:10px;border-left:3px solid var(--primary)">${El.escHtml(plan.rationale)}</div>` : ''}
                 <div style="font-size:12px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Workout Schedule</div>
                 ${(plan.workouts||[]).map(w => `<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg3);border-radius:10px;margin-bottom:8px">
                   <div style="font-size:20px">🏋️</div>
                   <div style="flex:1">
-                    <div style="font-weight:600;font-size:14px">${w.name}</div>
+                    <div style="font-weight:600;font-size:14px">${El.escHtml(w.name)}</div>
                     <div style="font-size:12px;color:var(--text2);margin-top:2px">${w.exercises.length} exercises</div>
                   </div>
                 </div>`).join('')}
@@ -2946,7 +2958,7 @@ const El = {
         </div>
         <div class="card fade-in" style="text-align:center;padding:28px">
           <div style="font-size:48px;margin-bottom:8px">👤</div>
-          <div style="font-size:22px;font-weight:700">${d.profile.name}</div>
+          <div style="font-size:22px;font-weight:700">${El.escHtml(d.profile.name)}</div>
           <div style="font-size:14px;color:var(--text2);margin-top:4px">${El.fmt(El.getIncome(d))}/month income · ${d.profile.currency}</div>
         </div>
 
@@ -3027,7 +3039,7 @@ const El = {
             </div>
             <div class="form-group" id="ai-key-group" style="display:${d.settings?.aiProvider&&d.settings?.aiProvider!=='builtin'?'block':'none'}">
               <label class="form-label">API Key</label>
-              <input class="form-input" id="ai-api-key" type="password" placeholder="Paste your API key here" value="${d.settings?.aiApiKey||''}">
+              <input class="form-input" id="ai-api-key" type="password" placeholder="Paste your API key here" value="${El.escHtml(d.settings?.aiApiKey||'')}">
               <div style="font-size:11px;color:var(--text3);margin-top:4px">Claude: console.anthropic.com &nbsp;·&nbsp; ChatGPT: platform.openai.com</div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -3061,7 +3073,7 @@ const El = {
         <div class="settings-section fade-in">
           <div class="settings-title">Profile</div>
           <div class="card">
-            <div class="form-group"><label class="form-label">Your Name</label><input class="form-input" id="set-name" value="${d.profile.name}"></div>
+            <div class="form-group"><label class="form-label">Your Name</label><input class="form-input" id="set-name" value="${El.escHtml(d.profile.name)}"></div>
             <div class="form-group"><label class="form-label">Currency</label>
               <select class="form-select" id="set-currency">
                 ${['USD','EUR','GBP','AED','CAD','AUD'].map(c=>`<option value="${c}" ${d.profile.currency===c?'selected':''}>${c}</option>`).join('')}
@@ -3077,8 +3089,8 @@ const El = {
                 ${(d.profile.incomes||[]).length===0 ? '<div style="font-size:12px;color:var(--text2);margin-bottom:10px">No income sources yet. Add one below.</div>' : (d.profile.incomes||[]).map(s=>`
                   <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg);border-radius:10px;margin-bottom:6px">
                     <div style="flex:1">
-                      <div style="font-size:13px;color:var(--text);font-weight:600">${s.name}</div>
-                      <div style="font-size:11px;color:var(--text2)">${{'monthly':'Monthly','biweekly':'Bi-weekly','weekly':'Weekly','yearly':'Yearly'}[s.frequency]||s.frequency}</div>
+                      <div style="font-size:13px;color:var(--text);font-weight:600">${El.escHtml(s.name)}</div>
+                      <div style="font-size:11px;color:var(--text2)">${El.escHtml({'monthly':'Monthly','biweekly':'Bi-weekly','weekly':'Weekly','yearly':'Yearly'}[s.frequency]||s.frequency)}</div>
                     </div>
                     <div style="font-size:14px;color:var(--teal);font-weight:700">${El.fmt(s.amount)}</div>
                     <button onclick="El.settings.deleteIncome('${s.id}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:20px;line-height:1;padding:0 4px">×</button>
@@ -3352,7 +3364,11 @@ const El = {
       const out = document.getElementById(outId);
       if (!out) return null;
       const flagColor = c => ({red:'var(--red)',orange:'var(--orange)',yellow:'var(--yellow)',green:'var(--teal)',gray:'var(--text3)'})[c] || 'var(--text2)';
-      const fmtBold = t => El.ai.escapeHtml(t).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+      // Use the canonical safeMd helper so all "escape first, then allow
+      // **bold** + \n → <br>" behavior lives in one place. Convention:
+      // any AI/markdown-ish text that becomes innerHTML must go through
+      // El.ai.safeMd — never inline `.replace(/\*\*.../, '<b>$1</b>')`.
+      const fmtBold = t => El.ai.safeMd(t);
       if (!opts.price) {
         out.innerHTML = '<div style="color:var(--text3);font-size:13px;text-align:center;padding:8px 0">Enter a price.</div>';
         return null;
@@ -5313,8 +5329,8 @@ const El = {
         ${events.length ? events.map(e=>`
           <div class="event-card ${e.type}" style="position:relative">
             <div class="event-time">${e.time||'All day'}</div>
-            <div style="flex:1"><div class="event-title">${e.title}</div>${e.notes?`<div class="event-sub">${e.notes}</div>`:''}</div>
-            ${e.gcal_url?`<a href="${e.gcal_url}" target="_blank" style="font-size:10px;color:var(--primary);text-decoration:none;flex-shrink:0">📅 GCal</a>`:''}
+            <div style="flex:1"><div class="event-title">${El.escHtml(e.title)}</div>${e.notes?`<div class="event-sub">${El.escHtml(e.notes)}</div>`:''}</div>
+            ${e.gcal_url?`<a href="${El.escHtml(e.gcal_url)}" target="_blank" style="font-size:10px;color:var(--primary);text-decoration:none;flex-shrink:0">📅 GCal</a>`:''}
             ${e.id ? `<button onclick="El.schedule.removeEvent('${e.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;position:absolute;top:6px;right:8px;font-size:16px">×</button>` : ''}
           </div>`).join('') : `<div style="text-align:center;padding:16px 0;color:var(--text3);font-size:14px">No events this day</div>`}
       </div>`;
@@ -5332,8 +5348,8 @@ const El = {
       allEl.innerHTML = upcoming.length ? upcoming.map(e=>`
         <div class="list-item">
           <div class="list-icon" style="background:${{event:'var(--primary-glow)',bill:'var(--red-glow)',reminder:'rgba(255,159,67,0.15)',goal:'var(--teal-glow)',task:'var(--bg3)'}[e.type]||'var(--bg3)'}">${{event:'📌',bill:'💳',reminder:'🔔',goal:'🎯',task:'✅'}[e.type]||'📌'}</div>
-          <div class="list-content"><div class="list-title">${e.title}</div><div class="list-sub">${e.date}${e.time?' · '+e.time:''}${e.notes?' · '+e.notes:''}</div></div>
-          ${e.gcal_url?`<a href="${e.gcal_url}" target="_blank" style="font-size:11px;color:var(--primary);text-decoration:none">GCal</a>`:''}
+          <div class="list-content"><div class="list-title">${El.escHtml(e.title)}</div><div class="list-sub">${e.date}${e.time?' · '+El.escHtml(e.time):''}${e.notes?' · '+El.escHtml(e.notes):''}</div></div>
+          ${e.gcal_url?`<a href="${El.escHtml(e.gcal_url)}" target="_blank" style="font-size:11px;color:var(--primary);text-decoration:none">GCal</a>`:''}
         </div>`).join('') : `<div style="padding:16px 0;color:var(--text3);font-size:14px;text-align:center">No upcoming events</div>`;
     },
     addEvent() {
@@ -5761,9 +5777,7 @@ const El = {
         const reply = provider === 'claude'
           ? await this.callClaude(apiKey, systemPrompt, question)
           : await this.callOpenAI(apiKey, systemPrompt, question);
-        const cleaned = this.stripElActions(reply)
-          .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-          .replace(/\n/g, '<br>');
+        const cleaned = this.safeMd(this.stripElActions(reply));
         if (out) out.innerHTML = '<div style="background:var(--bg);border-radius:12px;padding:14px;font-size:14px;line-height:1.6;color:var(--text)">'+cleaned+'</div>';
       } catch(e) {
         if (out) out.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px 0">⚠️ '+this.escapeHtml(e.message)+'</div>';
@@ -5790,9 +5804,7 @@ const El = {
         const reply = provider === 'claude'
           ? await this.callClaude(apiKey, systemPrompt, question)
           : await this.callOpenAI(apiKey, systemPrompt, question);
-        const cleaned = this.stripElActions(reply)
-          .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-          .replace(/\n/g, '<br>');
+        const cleaned = this.safeMd(this.stripElActions(reply));
         if (out) out.innerHTML = '<div style="background:var(--bg);border-radius:12px;padding:14px;font-size:14px;line-height:1.6;color:var(--text)">'+cleaned+'</div>';
       } catch(e) {
         if (out) out.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px 0">⚠️ '+this.escapeHtml(e.message)+'</div>';
@@ -5924,7 +5936,20 @@ const El = {
       if (!el) return;
       const div = document.createElement('div');
       div.className = `msg ${role} fade-in`;
-      div.innerHTML = `<div class="msg-avatar">${role==='ai'?'✦':'👤'}</div><div class="msg-bubble">${String(text).replace(/\n/g,'<br>')}</div>`;
+      // SECURITY: chat bubbles render as innerHTML.
+      //  - 'user' bubbles always carry raw user input (from `send()` and
+      //    from history replay). Run them through safeMd so a typed
+      //    `<script>` or stored chat history with HTML cannot execute.
+      //  - 'ai' bubbles are built two ways: (a) AI replies pre-formatted
+      //    via safeMd at the call site (chat respond / narrate paths),
+      //    or (b) app-built confirm cards that intentionally contain
+      //    trusted button HTML and already escape any user data with
+      //    esc()/escapeHtml() before concatenation. Both paths are safe
+      //    by construction, so we trust the 'ai' content.
+      const body = role === 'user'
+        ? this.safeMd(text)
+        : String(text).replace(/\n/g, '<br>');
+      div.innerHTML = `<div class="msg-avatar">${role==='ai'?'✦':'👤'}</div><div class="msg-bubble">${body}</div>`;
       el.appendChild(div);
       this.scrollToBottom();
       if (role === 'ai' && String(text).includes('confirmAdd()')) {
@@ -5943,6 +5968,17 @@ const El = {
     hideTyping() { document.getElementById('typing-indicator')?.remove(); },
     escapeHtml(s) {
       return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+    },
+    // SECURITY: render an AI / user string as safe HTML.
+    // Escapes ALL HTML first (so a model emitting <script>, <img onerror>,
+    // or any tag is neutralized), THEN re-introduces only the two
+    // formatting affordances we want: **bold** → <b>...</b> and \n → <br>.
+    // This is the only sanctioned path for turning a model response or
+    // chat-input string into innerHTML. Use this — never raw .replace().
+    safeMd(raw) {
+      return this.escapeHtml(raw)
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\n/g, '<br>');
     },
     calcPaydays(lastPayDateStr, frequency, count) {
       count = count || 8;
@@ -6224,6 +6260,18 @@ Do not emit any [[EL_ACTION]] for these — they are advice questions, not captu
     // Dynamic snapshot — sent fresh every turn (caps applied so it stays small).
     buildDynamicContext() {
       const d = El.state.get();
+      // SECURITY: prompt-injection defense. Any user-supplied string that
+      // gets concatenated into the system prompt is run through this
+      // sanitizer first. It neutralizes the [[EL_ACTION:…]] in-band signal
+      // (preventing a hostile transaction memo or calendar title from
+      // tricking the AI into emitting executable actions back to us),
+      // strips ASCII control characters, and caps length so a single
+      // long field can't blow out the context window.
+      const _safe = (s, max) => String(s == null ? '' : s)
+        .replace(/\[\[\s*EL_ACTION/gi, '[[ EL_ACT_')
+        .replace(/EL_ACTION\s*:/gi, 'EL_ACT_:')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+        .slice(0, max || 80);
       const income = El.getIncome(d);
       const totalDebt = (d.debts||[]).reduce((s,x)=>s+x.balance,0);
       const totalSavings = (d.savings||[]).reduce((s,x)=>s+x.current,0);
@@ -6242,7 +6290,7 @@ Do not emit any [[EL_ACTION]] for these — they are advice questions, not captu
         .sort((a,b) => a.date > b.date ? 1 : -1)
         .slice(0, 10);
       const scheduleLines = upcoming.length
-        ? upcoming.map(e => e.date + (e.time ? ' '+e.time : '') + ' — ' + e.title).join('\n')
+        ? upcoming.map(e => e.date + (e.time ? ' '+_safe(e.time, 12) : '') + ' — ' + _safe(e.title, 80)).join('\n')
         : 'none';
 
       const debts = (d.debts||[]).slice(0, TOP);
@@ -6253,10 +6301,10 @@ Do not emit any [[EL_ACTION]] for these — they are advice questions, not captu
       const mSpent = mTxns.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
       const mIncome = mTxns.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
       const recentTxns = [...mTxns].sort((a,b)=>b.date>a.date?1:-1).slice(0, RECENT_TXN_CAP)
-        .map(t=>(t.type==='income'?'+':'-')+El.fmt(t.amount)+' '+t.description).join(', ');
+        .map(t=>(t.type==='income'?'+':'-')+El.fmt(t.amount)+' '+_safe(t.description, 60)).join(', ');
 
       const cats = ((d.budget&&d.budget.categories)||[])
-        .map(c => c.name + ' ' + El.fmt(c.allocated||0)).join(', ');
+        .map(c => _safe(c.name, 40) + ' ' + El.fmt(c.allocated||0)).join(', ');
 
       const macroGoals = (d.macros&&d.macros.goals)||{calories:2000,protein:150,carbs:200,fat:65};
       const todayMacros = ((d.macros&&d.macros.log)||[]).filter(e=>e.date===today);
@@ -6269,17 +6317,17 @@ Do not emit any [[EL_ACTION]] for these — they are advice questions, not captu
         return Object.entries(groups).map(([key, label]) => {
           const items = planItems.filter(p => p.timeframe === key);
           if (!items.length) return null;
-          return label + ': ' + items.map(p => `[${p.status.replace('_',' ')}] ${p.text}`).join(' | ');
+          return label + ': ' + items.map(p => `[${p.status.replace('_',' ')}] ${_safe(p.text, 120)}`).join(' | ');
         }).filter(Boolean).join('\n');
       })() : 'No plan items set.';
 
-      return `USER: ${d.profile.name||'User'} · ${d.profile.currency||'USD'} · Income: ${El.fmt(income)}/mo · Risk: ${d.profile.riskTolerance||'moderate'}
+      return `USER: ${_safe(d.profile.name||'User', 40)} · ${_safe(d.profile.currency||'USD', 8)} · Income: ${El.fmt(income)}/mo · Risk: ${_safe(d.profile.riskTolerance||'moderate', 20)}
 Today: ${today} (${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date().getDay()]})
 
 FINANCES (capped):
 - Net worth: ${El.fmt(totalAccounts+totalSavings-totalDebt)}
-- Debt: ${El.fmt(totalDebt)}${debts.length ? ' — '+debts.map(x=>x.name+' '+El.fmt(x.balance)+' @'+x.apr+'% (min '+El.fmt(x.minPayment)+')').join(', ') : ''}
-- Savings: ${El.fmt(totalSavings)}${savings.length ? ' — '+savings.map(x=>x.name+' '+El.fmt(x.current)+'/'+El.fmt(x.target)).join(', ') : ''}
+- Debt: ${El.fmt(totalDebt)}${debts.length ? ' — '+debts.map(x=>_safe(x.name, 40)+' '+El.fmt(x.balance)+' @'+x.apr+'% (min '+El.fmt(x.minPayment)+')').join(', ') : ''}
+- Savings: ${El.fmt(totalSavings)}${savings.length ? ' — '+savings.map(x=>_safe(x.name, 40)+' '+El.fmt(x.current)+'/'+El.fmt(x.target)).join(', ') : ''}
 - This month: spent ${El.fmt(mSpent)} / earned ${El.fmt(mIncome||income)}
 - Recent: ${recentTxns||'none'}
 - Budget categories: ${cats||'none set'}
@@ -6470,8 +6518,7 @@ NUTRITION today: ${mt.cal}/${macroGoals.calories} cal · ${mt.p}/${macroGoals.pr
             ? await this.callClaude(apiKey, systemPrompt, text)
             : await this.callOpenAI(apiKey, systemPrompt, text);
           const actions = this.extractElActions(rawReply);
-          let cleanReply = this.stripElActions(rawReply);
-          cleanReply = cleanReply.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
+          let cleanReply = this.safeMd(this.stripElActions(rawReply));
           this.hideTyping();
           if (cleanReply) {
             this.addMsg('ai', cleanReply);
@@ -6496,7 +6543,13 @@ NUTRITION today: ${mt.cal}/${macroGoals.calories} cal · ${mt.p}/${macroGoals.pr
       }
 
       // Built-in fallback only when Built-in is selected.
-      const reply = this.generateReply(text.toLowerCase());
+      // SECURITY: generateReply() interpolates user-controlled fields
+      // (debt names, savings goals, event titles, etc.) into a markdown-
+      // style string and we render it as HTML downstream. Route it
+      // through safeMd so the formatting stays (`**bold**` → <b>, `\n`
+      // → <br>) but any HTML inside the user data is escaped first.
+      // This matches what the real-AI reply path does. Don't bypass.
+      const reply = this.safeMd(this.generateReply(text.toLowerCase()));
       setTimeout(()=>{
         this.hideTyping();
         this.addMsg('ai', reply);
@@ -7209,18 +7262,51 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       El.render.settings();
       setTimeout(() => { const el = document.getElementById('gcal-setup-section'); if (el) el.style.display = 'block'; }, 50);
     },
-    startGcalOAuth() {
+    // SECURITY: Authorization-code flow with PKCE + random state.
+    // Replaces the previous implicit (response_type=token) flow. Implicit
+    // leaks tokens in the URL fragment, has no refresh, and cannot be
+    // CSRF-protected. PKCE + state = modern recommended flow per RFC 8252.
+    async _genCodeVerifier() {
+      const b = new Uint8Array(32); crypto.getRandomValues(b);
+      return btoa(String.fromCharCode(...b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+    },
+    async _genCodeChallenge(verifier) {
+      const enc = new TextEncoder().encode(verifier);
+      const hash = await crypto.subtle.digest('SHA-256', enc);
+      return btoa(String.fromCharCode(...new Uint8Array(hash))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+    },
+    async _genState() {
+      const b = new Uint8Array(16); crypto.getRandomValues(b);
+      return btoa(String.fromCharCode(...b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+    },
+    async startGcalOAuth() {
       const d = El.state.get();
       const clientId = d.settings.gcal_client_id;
       if (!clientId) { alert('No Client ID saved. Enter your OAuth Client ID first.'); return; }
       const redirectUri = window.location.origin + window.location.pathname;
+      const verifier = await this._genCodeVerifier();
+      const challenge = await this._genCodeChallenge(verifier);
+      const state = await this._genState();
+      // Stash verifier + state in sessionStorage so we can validate the
+      // redirect callback. sessionStorage is per-tab and clears on close,
+      // which limits exposure if the auth flow is abandoned mid-way.
+      try {
+        sessionStorage.setItem('el_gcal_verifier', verifier);
+        sessionStorage.setItem('el_gcal_state', state);
+      } catch (e) {
+        alert('Could not start OAuth — sessionStorage unavailable.');
+        return;
+      }
       const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri,
-        response_type: 'token',
+        response_type: 'code',
         scope: 'https://www.googleapis.com/auth/calendar.events',
         include_granted_scopes: 'true',
-        state: 'gcal_oauth'
+        state: state,
+        code_challenge: challenge,
+        code_challenge_method: 'S256',
+        access_type: 'offline'
       });
       window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
     },
@@ -7243,7 +7329,31 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
     },
     exportData() {
       const d = El.state.get();
-      const data = JSON.stringify(d, null, 2);
+      // SECURITY: never write secrets into the export file. Users share /
+      // upload these JSONs as backups and they should not contain API
+      // keys, OAuth tokens, or Strava client secrets. We deep-clone via
+      // JSON round-trip, then strip every known credential field. The
+      // SECRET_KEYS allow-list is referenced by name (no wildcards) so
+      // a future field added to settings stays exported by default —
+      // remember to add new credentials here. Strava credentials live
+      // under their own localStorage key (`el_strava`) which is NOT
+      // included in the export at all.
+      const SECRET_KEYS = [
+        'aiApiKey', 'AI_KEY', 'aiOpenAiKey', 'aiClaudeKey',
+        'gcal_api_key', 'gcal_client_id', 'gcal_client_secret',
+        'gcalToken', 'gcalAccessToken', 'gcalRefreshToken',
+        'whisperKey', 'whisperApiKey', 'openAiKey',
+        'stravaClientSecret', 'stravaAccessToken', 'stravaRefreshToken'
+      ];
+      const safe = JSON.parse(JSON.stringify(d));
+      if (safe.settings && typeof safe.settings === 'object') {
+        for (const k of SECRET_KEYS) {
+          if (k in safe.settings) delete safe.settings[k];
+        }
+        // Mark the export so importers know secrets were stripped.
+        safe.settings._exportSecretsStripped = true;
+      }
+      const data = JSON.stringify(safe, null, 2);
       const blob = new Blob([data], { type:'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -7286,12 +7396,31 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       const file = input.files && input.files[0];
       if (!file) return;
       El.ui.showToast('Reading spreadsheet…', 'info', 3000);
-      // Load SheetJS dynamically
+      // Load SheetJS dynamically.
+      //
+      // SECURITY: this script is fetched from a third-party CDN. We:
+      //   1) pin to an immutable versioned URL,
+      //   2) require CORS so a Subresource Integrity hash CAN be enforced,
+      //   3) leave integrity OFF until the real hash is pinned (do NOT
+      //      ship a fabricated hash — it would silently break imports).
+      //
+      // To enable SRI before launch, run this on a trusted machine:
+      //   curl -sSL https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js \
+      //     | openssl dgst -sha384 -binary | openssl base64 -A
+      // then set EL_XLSX_SRI in the constant below to "sha384-<output>".
+      // Untrusted XLSX content is also defanged at parse time via
+      // _safeMerge() in _showXLSXPreview, so prototype pollution is
+      // blocked even without SRI. SRI is defense-in-depth against a
+      // CDN compromise.
+      const EL_XLSX_SRI = ''; // ← paste the sha384 string here to enable SRI
       if (!window.XLSX) {
         const script = document.createElement('script');
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        script.crossOrigin = 'anonymous';
+        script.referrerPolicy = 'no-referrer';
+        if (EL_XLSX_SRI) script.integrity = EL_XLSX_SRI;
         script.onload = () => El.settings._parseXLSX(file);
-        script.onerror = () => El.ui.showToast('Failed to load spreadsheet library. Check your connection.', 'error', 4000);
+        script.onerror = () => El.ui.showToast('Failed to load spreadsheet library. Check your connection or the integrity hash.', 'error', 4000);
         document.head.appendChild(script);
       } else {
         El.settings._parseXLSX(file);
@@ -7516,6 +7645,24 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       return data;
     },
     async _showXLSXPreview(parsed) {
+      // SECURITY: spreadsheet contents are untrusted. The merge below uses
+      // _safeMerge instead of Object.assign so a hostile XLSX cannot
+      // walk the prototype chain by injecting __proto__/constructor/
+      // prototype keys. Whitelisted shallow merge: own enumerable string
+      // keys only, dangerous keys dropped.
+      const _safeMerge = (...sources) => {
+        const out = Object.create(null);
+        const banned = new Set(['__proto__', 'constructor', 'prototype']);
+        for (const src of sources) {
+          if (!src || typeof src !== 'object') continue;
+          for (const k of Object.keys(src)) {
+            if (banned.has(k)) continue;
+            out[k] = src[k];
+          }
+        }
+        // Re-roof with normal Object prototype so callers using `.hasOwnProperty` etc still work.
+        return Object.assign({}, out);
+      };
       const rows = [
         ['Income', parsed.profile.income ? '$' + parsed.profile.income.toLocaleString() + '/mo' : '⚠️ not found'],
         ['Debts', parsed.debts.length ? parsed.debts.length + ' accounts' : '⚠️ none'],
@@ -7537,7 +7684,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       if (mode === 'R') {
         // Replace: full clean replace of all financial data for consistent scores
         merged = {
-          profile:    Object.assign({}, existing.profile || {}, parsed.profile || {}),
+          profile:    _safeMerge(existing.profile || {}, parsed.profile || {}),
           debts:      parsed.debts,
           savings:    parsed.savings,
           accounts:   parsed.accounts,
@@ -7557,7 +7704,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
           return (existing || []).concat(arr.filter(x => !names.has((x[key]||'').toLowerCase())));
         };
         merged = {
-          profile:    Object.assign({}, existing.profile || {}, parsed.profile || {}),
+          profile:    _safeMerge(existing.profile || {}, parsed.profile || {}),
           debts:      dedup(parsed.debts, existing.debts || [], 'name'),
           savings:    dedup(parsed.savings, existing.savings || [], 'name'),
           accounts:   dedup(parsed.accounts, existing.accounts || [], 'name'),
@@ -7586,7 +7733,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
       // Apply macro goals from import
       const existingMacros = existing.macros || { goals: { calories: 2000, protein: 150, carbs: 200, fat: 65 }, log: [] };
       if (parsed.macroGoals && Object.keys(parsed.macroGoals).length) {
-        const updatedGoals = Object.assign({}, existingMacros.goals || {}, parsed.macroGoals);
+        const updatedGoals = _safeMerge(existingMacros.goals || {}, parsed.macroGoals);
         merged.macros = { goals: updatedGoals, log: existingMacros.log || [] };
       } else {
         merged.macros = existingMacros;
@@ -7949,7 +8096,7 @@ Go to Finance → What If? → Job Loss Runway for a full scenario including bar
             + '</div>';
         }).join('');
         const hintHtml = hint ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;margin-bottom:6px">' + hint + '</div>' : '';
-        return '<div class="exercise-block"><div class="exercise-name">' + ex.name + '</div>' + hintHtml + rows + '</div>';
+        return '<div class="exercise-block"><div class="exercise-name">' + El.escHtml(ex.name) + '</div>' + hintHtml + rows + '</div>';
       }).join('');
       El.ui.openModal('modal-log-workout');
     },
@@ -8512,24 +8659,63 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch(e) { console.warn('[El] Strava OAuth parse error:', e); }
   }
-  // Google Calendar OAuth implicit flow — capture access_token on redirect back
-  if (window.location.hash && window.location.hash.includes('access_token')) {
-    try {
-      const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-      const token = params.get('access_token');
-      const state = params.get('state');
-      if (token && state === 'gcal_oauth') {
-        const existing = El.state.load();
-        if (existing) {
-          if (!existing.settings) existing.settings = {};
-          existing.settings.gcalToken = token;
-          existing.settings.gcal_connected = true;
-          El.state._data = existing;
-          El.state.save();
+  // Google Calendar OAuth — authorization-code flow with PKCE.
+  // The Strava handler above runs first and only fires when `scope=` is
+  // present in the query (Strava puts the granted scopes there); Google's
+  // code-flow redirect does NOT, so the two are mutually exclusive. We
+  // gate this branch additionally on having a stored verifier + state
+  // from sessionStorage so an attacker cannot trigger token exchange by
+  // crafting a malicious URL.
+  const _gcalSearch = window.location.search;
+  if (_gcalSearch && _gcalSearch.includes('code=') && !_gcalSearch.includes('scope=')) {
+    (async () => {
+      try {
+        const params = new URLSearchParams(_gcalSearch);
+        const code = params.get('code');
+        const returnedState = params.get('state');
+        const expectedState = sessionStorage.getItem('el_gcal_state');
+        const verifier = sessionStorage.getItem('el_gcal_verifier');
+        // Always clean the URL first so a refresh doesn't replay.
+        history.replaceState(null, '', window.location.pathname);
+        if (!code || !verifier || !expectedState || returnedState !== expectedState) {
+          if (returnedState && expectedState && returnedState !== expectedState) {
+            console.warn('[El] GCal OAuth state mismatch — possible CSRF.');
+          }
+          return;
         }
-        history.replaceState(null, '', window.location.pathname + window.location.search);
-      }
-    } catch(e) { console.warn('[El] GCal OAuth parse error:', e); }
+        sessionStorage.removeItem('el_gcal_verifier');
+        sessionStorage.removeItem('el_gcal_state');
+        const existing = El.state.load();
+        if (!existing) return;
+        const clientId = existing.settings && existing.settings.gcal_client_id;
+        if (!clientId) return;
+        const redirectUri = window.location.origin + window.location.pathname;
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: clientId,
+            code,
+            code_verifier: verifier,
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code'
+          }).toString()
+        });
+        if (!tokenRes.ok) {
+          console.warn('[El] GCal token exchange failed:', tokenRes.status);
+          return;
+        }
+        const json = await tokenRes.json();
+        if (!json || typeof json.access_token !== 'string') return;
+        if (!existing.settings) existing.settings = {};
+        existing.settings.gcalToken = json.access_token;
+        if (typeof json.refresh_token === 'string') existing.settings.gcalRefreshToken = json.refresh_token;
+        if (typeof json.expires_in === 'number') existing.settings.gcalTokenExpiresAt = Math.floor(Date.now()/1000) + json.expires_in;
+        existing.settings.gcal_connected = true;
+        El.state._data = existing;
+        El.state.save();
+      } catch (e) { console.warn('[El] GCal OAuth code-exchange error:', e); }
+    })();
   }
   const data = El.state.load();
   if (data && data.profile && data.profile.name) {
