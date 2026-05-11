@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-10 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix**)
+Last updated: 2026-05-11 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -959,15 +959,16 @@ const ws = _findSheet(wb, 'El Import - Workouts', 'Import Workouts');
 
 ### Repository Status
 
-`ElNative` is currently a local-only Expo Go test project. It does not
-have a GitHub remote/origin configured yet, and that is expected. Local
-commits are useful for rollback/history, but do not tell the user to run
-`git push origin master` for `ElNative` unless a GitHub repository has
-first been created and added as a remote.
+**Current as of 2026-05-11:** `ElNative` is no longer just an Expo Go
+test project. It has EAS configuration, an App Store Connect record,
+Apple Developer credentials, HealthKit entitlements, and TestFlight
+builds in progress. Older notes that say "Expo Go only", "local-only",
+or "Phase 4 not started" are historical and should not guide current
+deployment/testing work.
 
-Expo Go testing does not require GitHub. Use local commits plus
-`npx expo start` until the project is ready for backup, collaboration,
-EAS builds, or App Store / Play Store work.
+Use Expo Go only for UI that does not depend on native modules. For
+Apple Health/HealthKit, use a real native development build or
+TestFlight build.
 
 ### Data Layer
 
@@ -1020,14 +1021,18 @@ Wraps the entire app in `ElDataProvider` so all screens have access to shared da
 ### Running Locally
 
 ```bash
-cd ElNative && npx expo start --lan
+cd ElNative && npx expo start --dev-client
 ```
 
-Requires Expo Go (SDK 54) on the phone, connected to the same WiFi network.
+Requires the installed El development client/TestFlight build on the
+phone. Do not scan/open with Expo Go when testing Apple Health.
 
-### Phase 4 (Not Started)
+### Phase 4 (Started)
 
-EAS build + App Store submission. Requires an Apple Developer account ($99/yr). No EAS configuration has been committed yet.
+EAS/App Store Connect work is active. Current iOS bundle identifier is
+`com.eddietorresi.elnative`; App Store Connect generated listing name is
+`El (3a10f3)` because `El` was unavailable. See Round-19 for the current
+TestFlight state and exact next steps.
 
 ### Codex Checklist for Any ElNative Change
 
@@ -1265,47 +1270,57 @@ ordinary writes through the Edit tool keep getting cut off.
 - `hooks/useAppleHealth.ts` normalizes HealthKit responses that may arrive as either arrays or `{ samples: [...] }`, and treats `requestAuthorization()` as connected unless the native module explicitly returns `false`. This prevents the UI from staying blank after the Apple permission sheet completes.
 - Apple Health still must be tested on a real iPhone build with HealthKit entitlements. The proper path is an iOS development build or TestFlight/App Store build, then Settings -> Activity Sync -> Connect Apple Health, grant read permissions, and check Fitness -> Activities plus Settings -> Activity Sync.
 
+### Round-19 TestFlight / EAS current state
 
+- Current iOS path is **EAS + App Store Connect/TestFlight**, not Xcode. Eddie is on Windows; Xcode Cloud/Xcode is optional and not required for this workflow.
+- Do not use Expo Go for HealthKit validation. Apple Health requires a real native build with HealthKit entitlements. Use either:
+  - Development build: `eas build --platform ios --profile development`, then `npx expo start --dev-client`.
+  - TestFlight build: `eas build --platform ios --profile production`, then `eas submit --platform ios --latest`.
+- Build workflow rule:
+  - Most JS/TSX/UI/business-logic changes do **not** require a fresh native build when testing locally. Use the installed development client and run `npx expo start --dev-client`; the app loads the newest bundle from the computer.
+  - TestFlight installs are fixed snapshots. To see JS changes in TestFlight, upload a new TestFlight build.
+  - Fresh native builds are required for `app.json`, icon/splash assets, app name/bundle id, iOS permission strings, HealthKit/plugin/entitlement changes, native dependency add/remove, Expo SDK/React Native upgrades, and any build meant for TestFlight/App Store testers.
+- App Store Connect app record currently shows generated name `El (3a10f3)` because the exact listing name `El` was already taken/reserved. This does not block the installed app from being named `El`; it only affects the public App Store listing name, which can be changed later to a unique name.
+- Production build history:
+  - Build `1.0.0 (2)` uploaded successfully but was sent into TestFlight Beta App Review and shows `Waiting for Review`. Ignore it for immediate internal testing.
+  - Build `1.0.0 (3)` uploaded successfully on 2026-05-10 around 11:42 PM and shows `Ready to Submit` on the iOS Builds page. It should be used for internal testing.
+- Internal testing setup:
+  - Internal group: `Team`.
+  - Tester: `eddietorresi@yahoo.com` / Eddie Torres.
+  - If TestFlight on the phone asks for an invite code, the usual cause is that no usable build is attached to the internal group yet.
+  - In App Store Connect, go to `TestFlight -> Internal Testing -> Team -> Builds` and add build `1.0.0 (3)`. Do not use External Testing and do not click Submit for Review for internal-only testing.
+  - After build `3` is attached to the group and Eddie is listed under `Team -> Testers`, TestFlight should show the app or send an invite email. If it does not, remove/re-add Eddie to the group to resend the invite.
+  - Confirmed fix: Eddie removed himself from the internal tester group, added himself back, received the TestFlight email, and was then able to install the app. If TestFlight asks for an invite code again, refresh the internal tester membership before rebuilding or changing Xcode/EAS settings.
+- App icon/splash are still using Expo starter assets (`assets/images/icon.png` is the blue Expo-style A). This is cosmetic and not a setup failure. Replace icon/splash before wider TestFlight/public sharing; any asset change requires a new native build.
+
+### Round-20 Apple Heal
 ---
 
-## 🤖 2026-05-10 — Nightly autonomous builder (REMOVED — kept as historical record)
+## 🔧 2026-05-11 — Round-22 setup: filesystem branch-subdirectory issue
 
-⚠️ **Status: REMOVED on 2026-05-10 night.** The scheduled task `nightly-el-app-builder` was created and then deleted the same evening after multiple runs failed. Failure modes suspected (in rough order of likelihood): scheduled-session folder permissions not inherited; bash/git tool approvals not pre-applied to fresh sessions; codex preflight too brittle (aborted on path resolution differences); 600+ line prompt too heavy for a fresh agent context. Eddie chose to drop the autonomous nightly approach and continue working interactively with Cowork instead.
+When creating a git branch with a slash in the name (e.g. `fix/ai-tab-key-entry`), git failed with:
 
-If reviving this in the future, the lessons are:
-- Run the task **manually first via Cowork's "Run now"** to surface and debug all failures before scheduling.
-- **Pre-approve every tool** the run will touch — bash, git, file ops — by clicking through the prompts during a manual run.
-- **Keep the prompt small** (under ~150 lines) and scoped to ONE specific task, not a 36-item backlog with policy/escape-hatch machinery.
-- The escape-hatch system (`PAUSE NIGHTLY`, `DO NOT EDIT`, `BLOCKED:`) is still a sound design and worth keeping if a future autonomous agent ships.
+```
+fatal: cannot lock ref 'refs/heads/fix/ai-tab-key-entry':
+unable to create directory for .git/refs/heads/fix/ai-tab-key-entry
+```
 
-Original spec follows for reference.
+The filesystem (Windows NTFS / OneDrive / restrictive ACL on the path) prevents git from creating subdirectories under `.git/refs/heads/`. Slash branch names require git to mkdir a subdirectory; the underlying filesystem won't allow it.
 
----
+**Resolution: use hyphenated branch names instead of slash-prefixed.** All future branches in this repo follow the pattern `<type>-<slug>` not `<type>/<slug>`:
 
-ORIGINAL SPEC (no longer active):
+- `fix-ai-tab-key-entry` (not `fix/ai-tab-key-entry`)
+- `feat-privacy-reset-all-data` (not `feat/privacy-reset-all-data`)
+- `chore-privacy-policy-and-audit` (not `chore/...`)
 
-A Cowork scheduled task named `nightly-el-app-builder` was configured to run **hourly between 10:00pm and 8:00am local time** (cron `0 22-23,0-8 * * *`, ~11 runs/night). It picks ONE small item from a curated backlog per run, ships it on a date-stamped branch (`nightly-claude/YYYY-MM-DD-HHMM-<slug>`), gates on TypeScript + ESLint + dependency-pin + secret-scan, and documents every run in the **🤖 Nightly Agent Log** section that the task creates and maintains at the bottom of this file.
+GitHub renders these identically in the branch list. The `<type>-` prefix preserves the categorization. No code or workflow changes needed beyond the naming convention.
 
-**Where the task spec lives:** `C:\Users\Lap top\Documents\Claude\Scheduled\nightly-el-app-builder\SKILL.md`
+If you need to debug whether the FS issue persists, from PowerShell:
 
-**For Codex / human reviewers** — to audit a night's work:
+```powershell
+cd 'C:\Users\Lap top\Downloads\ElNative'
+mkdir .git\refs\heads\test-subdir; rmdir .git\refs\heads\test-subdir
+```
 
-1. `git fetch origin && git branch -r | grep nightly-claude/$(date +%Y-%m-%d)` lists the branches created last night.
-2. Cross-check against the **Nightly Agent Log** table at the bottom of this file. Every branch must have a corresponding row.
-3. Before merging any nightly-claude branch:
-   - `git checkout <branch> && npx tsc --noEmit | grep -v router.d.ts` should be clean
-   - `git diff master --name-only` should NOT include `package.json`, `package-lock.json`, `.env*`, or any SecureStore-related files unless the row explicitly notes "deps" or "secrets"
-   - `git log <branch> -p` should show focused changes for the one backlog item
-4. Merge by squash-and-merge (preserves a clean linear master history).
+If `mkdir` errors, the FS still blocks subdirectories. If it succeeds, slash-named branches would work — but the hyphenated convention is fine to keep regardless.
 
-**Escape hatches — control the agent without touching its prompt:**
-
-You can steer the agent at any time by editing this codex doc. Before doing ANY work, the agent reads this file and obeys these directives wherever they appear:
-
-| Write this anywhere in CODEX_CONTEXT.md | The agent will... |
-|---|---|
-| `PAUSE NIGHTLY` (or `STOP NIGHTLY` or `🛑 NIGHTLY`) | Skip the run entirely. Logs status `⚠️ paused`. Resume by deleting the line. |
-| `DO NOT EDIT app/(tabs)/finance.tsx` | Skip any backlog item that would touch that file. |
-| `BLOCKED: garmin-3-hook` | Skip that specific backlog slug; move to the next item. |
-
-These work because the agent's **Step 0** (codex preflight) greps the entire file for these strings before picking wor
