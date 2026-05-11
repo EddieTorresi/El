@@ -1223,3 +1223,40 @@ ordinary writes through the Edit tool keep getting cut off.
 - **Strava** integration tightening (after Garmin): activity import is wired but should also write back to Apple Health via `saveQuantitySample` so cross-app sync is bidirectional.
 - **iOS write-back to Health**: currently `toShare: []` everywhere. Future expansion can let El write weight, water, mindfulness sessions back to HealthKit so other apps see El's data.
 
+
+---
+
+## 🤖 2026-05-10 — Nightly autonomous builder (READ THIS, Codex)
+
+A Cowork scheduled task named `nightly-el-app-builder` runs **10 times per night** between 1:00am and 5:30am local time (cron `0,30 1-5 * * *`). It picks ONE small item from a curated backlog per run, ships it on a date-stamped branch (`nightly-claude/YYYY-MM-DD-HHMM-<slug>`), gates on TypeScript + ESLint + dependency-pin + secret-scan, and documents every run in the **🤖 Nightly Agent Log** section that the task creates and maintains at the bottom of this file.
+
+**Where the task spec lives:** `C:\Users\Lap top\Documents\Claude\Scheduled\nightly-el-app-builder\SKILL.md`
+
+**For Codex / human reviewers** — to audit a night's work:
+
+1. `git fetch origin && git branch -r | grep nightly-claude/$(date +%Y-%m-%d)` lists the branches created last night.
+2. Cross-check against the **Nightly Agent Log** table at the bottom of this file. Every branch must have a corresponding row.
+3. Before merging any nightly-claude branch:
+   - `git checkout <branch> && npx tsc --noEmit | grep -v router.d.ts` should be clean
+   - `git diff master --name-only` should NOT include `package.json`, `package-lock.json`, `.env*`, or any SecureStore-related files unless the row explicitly notes "deps" or "secrets"
+   - `git log <branch> -p` should show focused changes for the one backlog item
+4. Merge by squash-and-merge (preserves a clean linear master history).
+
+**Hard rules the agent will not violate** (mirror these in any code review):
+- Never pushes to master directly
+- Never force-pushes or rewrites history
+- Never edits package.json without an explicit backlog flag
+- Never deletes files
+- Never commits if any quality gate failed
+- Always leaves the working tree on master after a run
+- Always documents the run (success, skip, abort, or error)
+
+**Backlog scope** — five categories, ~33 items: UX polish (15), code health (5), Garmin integration (6), security (3), docs (4). When the backlog is exhausted, the task switches to a vuln + upkeep pass (`npm audit`, `npm outdated`, doc staleness check).
+
+**If something breaks:**
+- The branch is the safety valve — master never gets the bad commit.
+- Disable the scheduled task from Cowork's "Scheduled" sidebar (or by editing the SKILL.md `enabled: false`).
+- The aborted-run docs in the Nightly Agent Log show exactly which gate fired so you can diagnose.
+
+---
+
