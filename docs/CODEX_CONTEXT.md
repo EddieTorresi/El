@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-10 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration**)
+Last updated: 2026-05-10 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -1226,9 +1226,43 @@ ordinary writes through the Edit tool keep getting cut off.
 
 ---
 
+## 2026-05-10 — Rounds 14-16: Native polish + Apple Health data view (ElNative)
+
+### Round-14 theme contrast pass
+
+- `constants/theme.ts` now has higher-contrast light/dark secondary text plus `textOnAccent` and `cyan`.
+- Active tabs, blue buttons, FABs, swipe-delete labels, selected calendar dates, chat bubbles, save buttons, and selected chips use `El.textOnAccent`.
+- Finance category chips use `readableTextOn(cat.color)` so bright imported/custom category colors choose readable text automatically.
+- `components/themed-text.tsx` link text now asks the theme for `tint`.
+- Hidden `app/(tabs)/web.tsx` now uses `useElTheme()`.
+- `hooks/useElData.ts` returns updated state from `importHealthDayMacros()` after Apple Health macro import.
+
+### Round-15 Apple Health render-loop fix
+
+- `hooks/useAppleHealth.ts` memoizes the object returned from `useAppleHealth()`.
+- This fixes the "Maximum update depth exceeded" crash when opening Apple Health surfaces. The hook previously returned a fresh object on every render; Health cards used that object as a callback dependency, so local `setLoading` / `setData` updates retriggered the fetch effect indefinitely.
+- Keep Apple Health callbacks dependent on the stable hook return or specific hook methods/primitives. Do not reintroduce a fresh object return from the hook.
+
+### Round-16 Apple Health data view
+
+- Added `components/health-data-card.tsx`, a full Apple Health data surface that shows the data El can read:
+  - Activity today: move calories, exercise, stand, steps, walk/run distance, cycling distance, flights, mindful minutes.
+  - Body: weight, body fat, lean mass, BMI, height.
+  - Vitals: resting heart rate, HRV, SpO2, respiratory rate, body temperature.
+  - Sleep: date, asleep, deep, REM.
+  - Nutrition today: calories, protein, carbs, fat, water.
+  - Workouts: last-7-day count and latest workout summary.
+- Mounted this card in **Fitness -> Activities** as the primary place to see Apple Health data.
+- Mounted the same card under **Settings -> Activity Sync** after the Apple Health connection card, so the connection screen also previews real data after authorization.
+- `useAppleHealth.ts` checks HealthKit's `getRequestStatusForAuthorization()` on startup. If Apple Health was already connected in a previous app run, El marks it connected and can show data without making the user tap Connect again.
+- Fitness empty-state copy now says Apple Health is the main no-key source instead of referencing a future HealthKit pass.
+
+
+---
+
 ## 🤖 2026-05-10 — Nightly autonomous builder (READ THIS, Codex)
 
-A Cowork scheduled task named `nightly-el-app-builder` runs **10 times per night** between 1:00am and 5:30am local time (cron `0,30 1-5 * * *`). It picks ONE small item from a curated backlog per run, ships it on a date-stamped branch (`nightly-claude/YYYY-MM-DD-HHMM-<slug>`), gates on TypeScript + ESLint + dependency-pin + secret-scan, and documents every run in the **🤖 Nightly Agent Log** section that the task creates and maintains at the bottom of this file.
+A Cowork scheduled task named `nightly-el-app-builder` runs **hourly between 10:00pm and 8:00am local time** (cron `0 22-23,0-8 * * *`, ~11 runs/night). It picks ONE small item from a curated backlog per run, ships it on a date-stamped branch (`nightly-claude/YYYY-MM-DD-HHMM-<slug>`), gates on TypeScript + ESLint + dependency-pin + secret-scan, and documents every run in the **🤖 Nightly Agent Log** section that the task creates and maintains at the bottom of this file.
 
 **Where the task spec lives:** `C:\Users\Lap top\Documents\Claude\Scheduled\nightly-el-app-builder\SKILL.md`
 
@@ -1242,6 +1276,29 @@ A Cowork scheduled task named `nightly-el-app-builder` runs **10 times per night
    - `git log <branch> -p` should show focused changes for the one backlog item
 4. Merge by squash-and-merge (preserves a clean linear master history).
 
+**Escape hatches — control the agent without touching its prompt:**
+
+You can steer the agent at any time by editing this codex doc. Before doing ANY work, the agent reads this file and obeys these directives wherever they appear:
+
+| Write this anywhere in CODEX_CONTEXT.md | The agent will... |
+|---|---|
+| `PAUSE NIGHTLY` (or `STOP NIGHTLY` or `🛑 NIGHTLY`) | Skip the run entirely. Logs status `⚠️ paused`. Resume by deleting the line. |
+| `DO NOT EDIT app/(tabs)/finance.tsx` | Skip any backlog item that would touch that file. |
+| `BLOCKED: garmin-3-hook` | Skip that specific backlog slug; move to the next item. |
+
+These work because the agent's **Step 0** (codex preflight) greps the entire file for these strings before picking work. No need to disable the scheduled task or edit the SKILL.md prompt — just edit this doc, commit, push, and the next run will see it.
+
+**The agent's exact preflight sequence (Step 0):**
+
+1. Reads CODEX_CONTEXT.md in three slices: lines 1-200 (header + critical rules), lines around the middle (recent rounds), lines (total-100) to end (agent log + warnings).
+2. Greps the whole file for PAUSE / STOP / DO NOT EDIT / BLOCKED directives.
+3. Honors the "Codex Checklist for Any ElNative Change" section.
+4. Honors the "Critical Write Rules" section.
+5. Lists every backlog slug already marked done in the Nightly Agent Log table — those are skipped.
+6. Reads the most recent 3-5 round summary sections to understand what's mid-flight and avoid colliding with active refactors.
+
+If the codex doc is unreachable, the agent ABORTS the run rather than proceeding blind.
+
 **Hard rules the agent will not violate** (mirror these in any code review):
 - Never pushes to master directly
 - Never force-pushes or rewrites history
@@ -1253,19 +1310,4 @@ A Cowork scheduled task named `nightly-el-app-builder` runs **10 times per night
 
 **Backlog scope** — five categories, ~33 items: UX polish (15), code health (5), Garmin integration (6), security (3), docs (4). When the backlog is exhausted, the task switches to a vuln + upkeep pass (`npm audit`, `npm outdated`, doc staleness check).
 
-**If something breaks:**
-- The branch is the safety valve — master never gets the bad commit.
-- Disable the scheduled task from Cowork's "Scheduled" sidebar (or by editing the SKILL.md `enabled: false`).
-- The aborted-run docs in the Nightly Agent Log show exactly which gate fired so you can diagnose.
-
----
-
-## 🤖 Nightly Agent Log
-
-This section is maintained by `nightly-el-app-builder` (a Cowork scheduled task).
-Codex / human reviewers can verify nightly work by checking branch names against entries here.
-Each entry is one run.
-
-| Run | Branch | Item | Gates | Status | Notes |
-|---|---|---|---|---|---|
-| 2026-05-11 02:31 UTC | n/a | n/a (pre-flight failed) | not-run | ⚠️ skipped | ElNative repo in unsafe state: `.git/index` corrupt (`fatal: index file corrupt — bad signature 0x00000000`); 0-byte `.git/index.lock` and `.git/index.stash.6.lock` present (suggests interrupted git operation); HEAD on `mock-test/reset-all-data-button`, not `master`. Did **not** touch the repo (Hard Rule #5: never delete files; in-progress work may exist). **Recommended manual repair for Eddie:** `cd C:\Users\Lap top\Downloads\ElNative && del .git\index.lock && del .git\index.stash.6.lock && git reset && git status` — if index is still corrupt after removing locks: `del .git\index && git reset`. Then `git checkout master`. Next nightly run will resume normally. |
+**I
