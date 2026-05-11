@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-11 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass** + **Round-23 post-TestFlight bug fixes**)
+Last updated: 2026-05-12 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass** + **Round-23 post-TestFlight bug fixes** + **Round-24 AI followup + UX research implementation**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -1483,14 +1483,46 @@ Followup: the AI fixes shipped but Eddie reported the AI tab is still misbehavin
    - AI tab → reply to AI's response (should remember context)
    - AI tab → "log $12 coffee at starbucks" (should produce action card; tap Add → check Finance → Transactions for the new entry)
 
+### Followup AI diagnosis result (Codex, build 5)
+
+Eddie confirmed he is testing on TestFlight build `1.0.0 (5)`, so the remaining AI issue was treated as a real code-path bug rather than old-binary drift.
+
+Branch: `fix-ai-followup-2026-05-12`  
+Commit: `0c24caf fix(ai): tolerate action parsing and validation variants`
+
+What changed:
+
+- `hooks/useAI.ts` was verified correct: chat requests send the prompt through Anthropic's top-level `system` field, with `anthropic-version: 2023-06-01`, and model IDs `claude-haiku-4-5-20251001` / `claude-sonnet-4-6`.
+- `services/elAI.ts` now accepts common harmless action variants before validation: capitalized action/type names, string amounts like `"$12.50"`, and parseable natural dates.
+- `EL_ACTION` extraction no longer requires the JSON to be the literal final bytes of the response. It now uses a balanced-brace scanner, so action cards still render when Claude adds a sentence after the JSON.
+- `answerWithActions()` max token budget increased from `700` to `1500`.
+- A compact last-7-days spending summary was added to the system context so questions like "what did I spend last week?" have direct grounded data.
+- Dev-only `console.warn` logging now surfaces rejected AI action payloads instead of silently failing.
+
+Verification: `npx tsc --noEmit` passed, and `services/elAI.ts` tail check ended cleanly.
+
 
 ---
 
-## 🎨 2026-05-12 — Round-24 (planned): UX research recommendations from Gemini Deep Research
+## 🎨 2026-05-12 — Round-24: UX research recommendations from Gemini Deep Research
 
 A Gemini Deep Research pass studied 19 competitor apps across El's domains (Copilot, Monarch Money, YNAB, Apple Wallet, Strong, Strava, Apple Fitness+, MyFitnessPal, Cronometer, Lifesum, Fantastical, Notion Calendar, Apple Calendar, ChatGPT, Claude iOS, Perplexity, Streaks, Things 3, Bear). The full report is in `uploads/El UX Competitor Research Report.md` on Eddie's local Cowork session.
 
-The recommendations below are PLANNED for Round-24 (post-Round-23 AI bug fixes). They will ship on a single branch `feat-ux-research-pass-2026-05-12` with one commit per item, mergeable independently if any item proves harder than expected. The current TestFlight build (1.0.0 (4) and the upcoming (5) with Round-23 fixes) does NOT include these — they're queued for the next round.
+The recommendations below started as the Round-24 plan (post-Round-23 AI bug fixes). The implemented branch is `feat-ux-research-pass-2026-05-12`, stacked on top of `fix-ai-followup-2026-05-12`; merge order should be AI followup first, UX branch second. TestFlight build `1.0.0 (5)` does NOT include these branches until they are merged and a new build is cut.
+
+### Implementation status
+
+| Item | Status | Commit |
+|---|---|---|
+| B1 sticky horizontal category strip filter | Shipped | `db7c5f7 feat(ux): add finance category strip filter` |
+| B2 haptic long-press completion | Shipped | `70bb4f9 feat(ux): add haptic hold completion affordance` |
+| B3 editable AI action cards | Shipped | `e21d83e feat(ux): make AI action cards editable` |
+| B4 AI suggested follow-up chips | Shipped | `772f295 feat(ux): add AI suggested follow-ups` |
+| B5 live natural-language parse preview | Shipped | `3550d93 feat(ux): add live natural language parse preview` |
+| B7 over-budget deficit formatting | Shipped | `857ebfc feat(ux): clarify over-budget category deficits` |
+| B6/B8/B9/B10/B11/B12 | Deferred | No commit; lower-priority polish and/or needs more product decisions. |
+
+Verification: `npx tsc --noEmit` passed after every commit; edited files passed tail/truncation checks. New files: `components/haptic-hold-button.tsx`, `components/parse-live-preview.tsx`, `utils/naturalLanguageParse.ts`.
 
 ### Top 5 high-impact patterns (ranked by impact-vs-effort)
 
@@ -1544,4 +1576,3 @@ Round-23 closes out the bug-fix cycle from the first TestFlight install. Round-2
 2. AI proxy deployment + StoreKit IAP for the paid AI tier
 3. App icon + splash replacements (currently still Expo starter assets)
 4. App Store Connect App Privacy nutrition label + listing name reservation
-
