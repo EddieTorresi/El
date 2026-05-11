@@ -1260,3 +1260,12 @@ A Cowork scheduled task named `nightly-el-app-builder` runs **10 times per night
 
 ---
 
+## 🤖 Nightly Agent Log
+
+This section is maintained by `nightly-el-app-builder` (a Cowork scheduled task).
+Codex / human reviewers can verify nightly work by checking branch names against entries here.
+Each entry is one run.
+
+| Run | Branch | Item | Gates | Status | Notes |
+|---|---|---|---|---|---|
+| 2026-05-11 02:31 UTC | n/a | n/a (pre-flight failed) | not-run | ⚠️ skipped | ElNative repo in unsafe state: `.git/index` corrupt (`fatal: index file corrupt — bad signature 0x00000000`); 0-byte `.git/index.lock` and `.git/index.stash.6.lock` present (suggests interrupted git operation); HEAD on `mock-test/reset-all-data-button`, not `master`. Did **not** touch the repo (Hard Rule #5: never delete files; in-progress work may exist). **Recommended manual repair for Eddie:** `cd C:\Users\Lap top\Downloads\ElNative && del .git\index.lock && del .git\index.stash.6.lock && git reset && git status` — if index is still corrupt after removing locks: `del .git\index && git reset`. Then `git checkout master`. Next nightly run will resume normally. |
