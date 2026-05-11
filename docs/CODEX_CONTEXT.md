@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-10 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning**)
+Last updated: 2026-05-10 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -1257,12 +1257,34 @@ ordinary writes through the Edit tool keep getting cut off.
 - `useAppleHealth.ts` checks HealthKit's `getRequestStatusForAuthorization()` on startup. If Apple Health was already connected in a previous app run, El marks it connected and can show data without making the user tap Connect again.
 - Fitness empty-state copy now says Apple Health is the main no-key source instead of referencing a future HealthKit pass.
 
+### Round-18 Apple Health visibility + Budget dark-mode chip fix
+
+- `app/(tabs)/finance.tsx` now gives `smallChipLabel` an explicit `El.textSecondary` color. This fixes the Finance -> Budget transaction/category chips defaulting to black in dark mode.
+- `components/health-data-card.tsx` now defaults to a visible unavailable state instead of returning `null`, and the copy explains the real constraint: Apple Health needs an iOS development, TestFlight, or App Store build. Expo Go and web previews cannot load the native HealthKit module.
+- `app/(tabs)/fitness.tsx` and `app/(tabs)/settings.tsx` force the Apple Health data card to remain visible on Fitness -> Activities and Settings -> Activity Sync, so connection state and diagnostics are visible even before data is flowing. `components/health-today-card.tsx` now does the same on Home.
+- `hooks/useAppleHealth.ts` normalizes HealthKit responses that may arrive as either arrays or `{ samples: [...] }`, and treats `requestAuthorization()` as connected unless the native module explicitly returns `false`. This prevents the UI from staying blank after the Apple permission sheet completes.
+- Apple Health still must be tested on a real iPhone build with HealthKit entitlements. The proper path is an iOS development build or TestFlight/App Store build, then Settings -> Activity Sync -> Connect Apple Health, grant read permissions, and check Fitness -> Activities plus Settings -> Activity Sync.
+
 
 ---
 
-## 🤖 2026-05-10 — Nightly autonomous builder (READ THIS, Codex)
+## 🤖 2026-05-10 — Nightly autonomous builder (REMOVED — kept as historical record)
 
-A Cowork scheduled task named `nightly-el-app-builder` runs **hourly between 10:00pm and 8:00am local time** (cron `0 22-23,0-8 * * *`, ~11 runs/night). It picks ONE small item from a curated backlog per run, ships it on a date-stamped branch (`nightly-claude/YYYY-MM-DD-HHMM-<slug>`), gates on TypeScript + ESLint + dependency-pin + secret-scan, and documents every run in the **🤖 Nightly Agent Log** section that the task creates and maintains at the bottom of this file.
+⚠️ **Status: REMOVED on 2026-05-10 night.** The scheduled task `nightly-el-app-builder` was created and then deleted the same evening after multiple runs failed. Failure modes suspected (in rough order of likelihood): scheduled-session folder permissions not inherited; bash/git tool approvals not pre-applied to fresh sessions; codex preflight too brittle (aborted on path resolution differences); 600+ line prompt too heavy for a fresh agent context. Eddie chose to drop the autonomous nightly approach and continue working interactively with Cowork instead.
+
+If reviving this in the future, the lessons are:
+- Run the task **manually first via Cowork's "Run now"** to surface and debug all failures before scheduling.
+- **Pre-approve every tool** the run will touch — bash, git, file ops — by clicking through the prompts during a manual run.
+- **Keep the prompt small** (under ~150 lines) and scoped to ONE specific task, not a 36-item backlog with policy/escape-hatch machinery.
+- The escape-hatch system (`PAUSE NIGHTLY`, `DO NOT EDIT`, `BLOCKED:`) is still a sound design and worth keeping if a future autonomous agent ships.
+
+Original spec follows for reference.
+
+---
+
+ORIGINAL SPEC (no longer active):
+
+A Cowork scheduled task named `nightly-el-app-builder` was configured to run **hourly between 10:00pm and 8:00am local time** (cron `0 22-23,0-8 * * *`, ~11 runs/night). It picks ONE small item from a curated backlog per run, ships it on a date-stamped branch (`nightly-claude/YYYY-MM-DD-HHMM-<slug>`), gates on TypeScript + ESLint + dependency-pin + secret-scan, and documents every run in the **🤖 Nightly Agent Log** section that the task creates and maintains at the bottom of this file.
 
 **Where the task spec lives:** `C:\Users\Lap top\Documents\Claude\Scheduled\nightly-el-app-builder\SKILL.md`
 
@@ -1286,28 +1308,4 @@ You can steer the agent at any time by editing this codex doc. Before doing ANY 
 | `DO NOT EDIT app/(tabs)/finance.tsx` | Skip any backlog item that would touch that file. |
 | `BLOCKED: garmin-3-hook` | Skip that specific backlog slug; move to the next item. |
 
-These work because the agent's **Step 0** (codex preflight) greps the entire file for these strings before picking work. No need to disable the scheduled task or edit the SKILL.md prompt — just edit this doc, commit, push, and the next run will see it.
-
-**The agent's exact preflight sequence (Step 0):**
-
-1. Reads CODEX_CONTEXT.md in three slices: lines 1-200 (header + critical rules), lines around the middle (recent rounds), lines (total-100) to end (agent log + warnings).
-2. Greps the whole file for PAUSE / STOP / DO NOT EDIT / BLOCKED directives.
-3. Honors the "Codex Checklist for Any ElNative Change" section.
-4. Honors the "Critical Write Rules" section.
-5. Lists every backlog slug already marked done in the Nightly Agent Log table — those are skipped.
-6. Reads the most recent 3-5 round summary sections to understand what's mid-flight and avoid colliding with active refactors.
-
-If the codex doc is unreachable, the agent ABORTS the run rather than proceeding blind.
-
-**Hard rules the agent will not violate** (mirror these in any code review):
-- Never pushes to master directly
-- Never force-pushes or rewrites history
-- Never edits package.json without an explicit backlog flag
-- Never deletes files
-- Never commits if any quality gate failed
-- Always leaves the working tree on master after a run
-- Always documents the run (success, skip, abort, or error)
-
-**Backlog scope** — five categories, ~33 items: UX polish (15), code health (5), Garmin integration (6), security (3), docs (4). When the backlog is exhausted, the task switches to a vuln + upkeep pass (`npm audit`, `npm outdated`, doc staleness check).
-
-**I
+These work because the agent's **Step 0** (codex preflight) greps the entire file for these strings before picking wor
