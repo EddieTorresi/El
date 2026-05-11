@@ -1329,19 +1329,36 @@ If `mkdir` errors, the FS still blocks subdirectories. If it succeeds, slash-nam
 
 ## 🚀 2026-05-11 — Round-22: TestFlight launch readiness pass
 
-This round is the final batch of pre-launch work before sending the El TestFlight build to friends and family. Six branches shipped, each independently mergeable. All shipped on `master` via squash-merge in GitHub.
+This round is the final batch of pre-launch work before sending the El TestFlight build to friends and family. The native work is a stacked PR chain, not yet assumed to be on `master` until Eddie merges it in GitHub. Merge in the exact order listed below.
 
 ### Branches shipped this round
 
 | Branch | Commit | What |
 |---|---|---|
-| `fix-ai-tab-key-entry` | (combined with Apple Health) | Restored inline Anthropic key entry in the AI tab — Round-10 had removed the user-facing path in anticipation of the proxy, but the proxy isn't deployed. AI tab dead-ended for testers. |
+| `fix-ai-tab-key-entry` | `3e9a309` | Restored inline Anthropic key entry in the AI tab — Round-10 had removed the user-facing path in anticipation of the proxy, but the proxy isn't deployed. AI tab dead-ended for testers. |
 | `feat-privacy-reset-all-data` | `08d3fdd` | `clearAllData()` now wipes every `el_*` AsyncStorage key + all SecureStore tokens (`el_anthropic_key`, `el_whisper_key`, `el_gcal_tokens`, `el_gcal_client_id`, `el_oauth_<provider>` for every entry in FITNESS_PROVIDERS, plus `el_creds_<provider>` after Round-22's wellness providers landed). Settings → Clear All Data alert text updated to mention API keys + connected services. |
 | `feat-privacy-explainer-page` | `f779103` | New `app/privacy.tsx` route — five-section plain-English explainer of how El handles data. Linked from Settings → top of screen above Profile. Route cast as `any` to match existing health-today-card pattern (typed routes regenerate on next expo start). |
-| `feat-privacy-faceid-gate` | `399a438` | Added `expo-local-authentication`. New `components/biometric-gate.tsx` wraps the navigation stack in `app/_layout.tsx`. Settings → Security toggle controls `settings.biometricLockEnabled` (default OFF). When enabled: cold-start prompt + relock after 5 min in background. Fail/cancel → Locked screen with Retry. If device has no enrolled biometric → fail-open (does not block). |
-| `feat-default-theme-dark` | `52a0783` | Default theme flipped from 'auto' to 'dark' for fresh installs in `DEFAULT_DATA.settings`. Existing users keep their saved preference because AsyncStorage's persisted settings take priority over DEFAULT_DATA in `sanitizeStored`. |
-| `feat-accessibility-labels-pass` | (4 commits) | 133 Pressables labeled across all 7 tabs. Added `accessibilityRole`, `accessibilityLabel`, `accessibilityState` (where selected/checked/expanded), and `accessibilityHint` (where the action isn't obvious). Per-tab counts: ai 7, fitness 8, schedule 12, index 10, nutrition 21, settings 24, finance 53. |
-| `feat-wellness-providers` | (latest) | Direct OAuth provider connect UI for Strava, Garmin, Oura, Fitbit. New `components/provider-connect-card.tsx` is a generic card that takes any `FitnessProviderConfig` and handles three states: no creds (entry form + docs link), has creds (Connect button), connected (Disconnect + Forget creds). Whoop deferred — their API requires app approval. Credentials live under `el_creds_<key>` in SecureStore parallel to `el_oauth_<key>` tokens. `ALLOWED_DEEP_LINK_HOSTS` expanded to include `oura`, `withings`, `mapmyrun`. |
+| `feat-privacy-faceid-gate` | `72d1017` | Added `expo-local-authentication`. New `components/biometric-gate.tsx` wraps the navigation stack in `app/_layout.tsx`. Settings → Security toggle controls `settings.biometricLockEnabled` (default OFF). When enabled: cold-start prompt + relock after 5 min in background. Fail/cancel → Locked screen with Retry. If device has no enrolled biometric → fail-open (does not block). Post-audit fix: the gate now locks after persisted settings load, not only during the initial render. |
+| `feat-default-theme-dark` | `1e974ed` | Default theme flipped from 'auto' to 'dark' for fresh installs in `DEFAULT_DATA.settings`. Existing users keep their saved preference because AsyncStorage's persisted settings take priority over DEFAULT_DATA in `sanitizeStored`. |
+| `feat-accessibility-labels-pass` | `40aa185` | 133 Pressables labeled across all 7 tabs. Added `accessibilityRole`, `accessibilityLabel`, `accessibilityState` (where selected/checked/expanded), and `accessibilityHint` (where the action isn't obvious). Per-tab counts: ai 7, fitness 8, schedule 12, index 10, nutrition 21, settings 24, finance 53. |
+| `feat-wellness-providers` | `b8893b3` | Direct OAuth provider connect UI for Strava, Garmin, Oura, Fitbit. New `components/provider-connect-card.tsx` is a generic card that takes any `FitnessProviderConfig` and handles three states: no creds (entry form + docs link), has creds (Connect button), connected (Disconnect + Forget creds). Whoop deferred — their API requires app approval. Credentials live under `el_creds_<key>` in SecureStore parallel to `el_oauth_<key>` tokens. `ALLOWED_DEEP_LINK_HOSTS` expanded to include `oura`, `withings`, `mapmyrun`. Post-audit fix: Garmin/Oura/Fitbit now declare explicit `extraFields` allow-lists and align with the requested OAuth token/scope config. |
+
+### Round-22 pre-merge verification update
+
+After the initial audit, Codex found two merge blockers and Eddie applied both fixes from PowerShell:
+
+- `feat-privacy-faceid-gate` now ends at `72d1017` (`fix(privacy): lock biometric gate after settings load`). Root cause: `BiometricGate` initialized `locked` from `enabled`, but `enabled` is false until persisted settings load. The fix adds a per-session unlock ref and sets `locked=true` when `biometricLockEnabled` becomes true after load.
+- `feat-wellness-providers` now ends at `b8893b3` (`fix(wellness): add provider extra-field allow lists`). Root cause: Garmin/Oura/Fitbit did not declare explicit `extraFields`; the fix adds those allow-lists and corrects Garmin/Oura/Fitbit token/scope config.
+
+Post-fix checks run by Codex on the final stacked branch `feat-wellness-providers`:
+
+- `npx.cmd tsc --noEmit` clean.
+- Tail/truncation check clean for every file changed relative to `origin/master`.
+- Hardcoded-secret grep clean.
+- `Object.assign(.*JSON.parse)` grep clean.
+- Branch stack is linear: `fix-ai-tab-key-entry` → `feat-privacy-reset-all-data` → `feat-privacy-explainer-page` → `feat-privacy-faceid-gate` → `feat-default-theme-dark` → `feat-accessibility-labels-pass` → `feat-wellness-providers`.
+
+Merge recommendation: merge the PRs in exactly that order. If any GitHub merge step reports a conflict, stop and resolve that PR before continuing down the stack.
 
 ### AI tab fix — root cause documented
 
@@ -1420,4 +1437,3 @@ Grep results after Round-22 work, against the ElNative tree:
 | `hooks/useElData.ts` | `biometricLockEnabled` field on AppSettings; `clearAllData()` wipes all `el_*` AsyncStorage keys + all SecureStore tokens + creds; default theme = 'dark'. |
 | `package.json` + `package-lock.json` | `expo-local-authentication` added. |
 | `docs/PRIVACY_POLICY.md` (this repo) | New file — App Store privacy policy markdown. |
-
