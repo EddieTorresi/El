@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-11 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass**)
+Last updated: 2026-05-11 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass** + **Round-23 post-TestFlight bug fixes**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -1417,23 +1417,131 @@ Grep results after Round-22 work, against the ElNative tree:
 - **`npm audit fix`** — read the `npm audit` JSON, decide per-finding whether to patch or document an exception. Avoid `--force`.
 - **Whoop integration** — needs WHOOP developer access (gated). Apply at https://developer.whoop.com when ready.
 - **App Store icon + splash** — still using Expo starter assets (`assets/images/icon.png` is the blue Expo "A"). Replace before public launch. Any asset change requires a new native build.
-- **App Store Connect listing name** — currently `El (3a10f3)` because the exact name `El` was reserved. Cosmetic only; can change later via App Store Connect.
+- **App Store Connect list
+---
 
-### Files touched this round
+## 🐛 2026-05-12 — Round-23: post-TestFlight bug fixes (in progress)
 
-| File | Round-22 change |
+TestFlight build `1.0.0 (4)` was installed by Eddie and tested. Five real bugs surfaced from real-world use, plus one false alarm. This round triages and patches them. Followup investigation is being delegated to a separate codex session because the AI fixes (Round-23a) didn't fully resolve the reported AI symptoms.
+
+### Bugs reported from TestFlight build (4)
+
+| # | Symptom | Root cause | Status |
+|---|---|---|---|
+| 1 | Voice mic in AI tab crashes with `NSOSStatusErrorDomain code=1718449215 "(null)"` | iOS audio session got `outputFormat: 'aac'` (literal string) where AVAudioRecorder expects a FourCC numeric value. 1718449215 = 0x66726D74 = ASCII 'frmt' = format error. | ✅ Fixed `a3bde7d` |
+| 2 | AI tab doesn't see imported transactions/finance data | `services/elAI.ts::answerWithActions` system prompt only included monthly budget + 10 recent transactions + macro goals out of ~15 available context fields. | ✅ Fixed `dfcecee` |
+| 3 | AI doesn't see workout plan | Same root cause — workout templates and logs were never injected into the system prompt. | ✅ Fixed `dfcecee` |
+| 4 | AI doesn't remember conversation history | `answerWithActions` built a `messages` array with prior turns then **never sent it**. Line 704 called `complete(userMessage, ...)` which only sends a single message. The history array was dead code. | ✅ Fixed `dfcecee` (switched to `chat()` which accepts multi-turn) |
+| 5 | AI action cards don't actually save / "doesn't update tracker correctly" | Tied to #2-4 — without proper context the model rarely emitted EL_ACTION at all, and EL_ACTION instructions in the system prompt were weak (no concrete examples). | ✅ Fixed `dfcecee` (strengthened instructions with per-type examples) |
+| 6 | Recurring expenses not auto-projecting to calendar | False alarm. Schedule code (`buildSyntheticBills`) is correct. User confirmed Finance → Recurring tab does show their bills, and they project onto the calendar normally. | ✅ Verified working |
+
+Followup: the AI fixes shipped but Eddie reported the AI tab is still misbehaving even after the Round-23a patches. Possible causes being investigated by a delegated codex session:
+
+- Eddie may be testing on TestFlight `1.0.0 (4)` which pre-dates the fixes — needs a fresh `eas build --profile production --platform ios` for `1.0.0 (5)` before the AI fixes are actually on his phone
+- The system prompt may be too large for the model to handle reliably (>20K tokens hurts quality)
+- The EL_ACTION regex may not match real model outputs that put text after the JSON
+- `validateElAction` may be silently rejecting valid actions (e.g. capitalized `"Expense"` instead of `"expense"`)
+
+### Branches shipped this round
+
+| Branch | Commit | What |
+|---|---|---|
+| `fix-voice-audio-format` | `a3bde7d` | Use `Audio.RecordingOptionsPresets.HIGH_QUALITY` when available; fall back to FourCC numeric `0x61616320` (ASCII `'aac '` = MPEG4AAC) for iOS. Bypasses the broken string-parse path that produced the 'frmt' error. |
+| `fix-ai-context-and-memory` | `dfcecee` | `answerWithActions` now uses `chat()` (multi-turn) instead of `complete()` (single-turn). System prompt builder injects profile/budget/income/transactions/per-category-totals/recurring/debts/savings/accounts/plan/workout-templates/workout-logs/Strava/macro-goals/macro-logs/weight-log/upcoming-events. Every user-controlled string passed through `sanitizeForPrompt`. EL_ACTION emission instructions strengthened with concrete examples per type (transaction/event/reminder). `AnswerContext` interface expanded accordingly; `ai.tsx` now passes the full data slice. |
+| `fix-ai-build-errors` | (PR pending) | Cleanup of two TS errors from the prior commit: `ai.tsx` useCallback dep array still referenced removed `complete` function; `elAI.ts` had a duplicate `ChatFn` type definition (file already had one at line 33 using imported `AIMessage` type). |
+
+### Files changed this round (cumulative)
+
+| File | Change |
 |---|---|
-| `app/(tabs)/ai.tsx` | Inline key-entry form when neither `usesAppService` nor `hasKey` is true; styles for `keyInput`, `keyError`, `keySaveBtn`, `keySaveLabel`, `keyHelp`. Plus 7 a11y labels. |
-| `app/(tabs)/settings.tsx` | Privacy link card at top; Security section with FaceID toggle; "Direct Provider Sync (advanced)" subsection mounting 4 ProviderConnectCards; expanded Clear All Data Alert text; useRouter import. Plus 24 a11y labels. |
-| `app/(tabs)/finance.tsx` | 53 a11y labels (no functional change) |
-| `app/(tabs)/fitness.tsx` | 8 a11y labels (no functional change) |
-| `app/(tabs)/schedule.tsx` | 12 a11y labels (no functional change) |
-| `app/(tabs)/index.tsx` | 10 a11y labels (no functional change) |
-| `app/(tabs)/nutrition.tsx` | 21 a11y labels (no functional change) |
-| `app/_layout.tsx` | Wraps stack in `<BiometricGate>`; expanded `ALLOWED_DEEP_LINK_HOSTS`. |
-| `app/privacy.tsx` | New file — Privacy & Your Data explainer screen. |
-| `components/biometric-gate.tsx` | New file — opt-in Face ID / passcode launch gate. |
-| `components/provider-connect-card.tsx` | New file — generic OAuth provider connect UI. |
-| `hooks/useElData.ts` | `biometricLockEnabled` field on AppSettings; `clearAllData()` wipes all `el_*` AsyncStorage keys + all SecureStore tokens + creds; default theme = 'dark'. |
-| `package.json` + `package-lock.json` | `expo-local-authentication` added. |
-| `docs/PRIVACY_POLICY.md` (this repo) | New file — App Store privacy policy markdown. |
+| `hooks/useVoiceInput.ts` | RECORDING_OPTIONS uses `Audio.RecordingOptionsPresets.HIGH_QUALITY` when present, FourCC numeric fallback otherwise; explanatory comment about the 'frmt' error |
+| `hooks/useAI.ts` | No code change — but the existing `chat()` function (which always took a messages array) is now actually used by `answerWithActions` |
+| `services/elAI.ts` | `AnswerContext` interface expanded from 6 fields to 15+; `answerWithActions` rewritten to call `chat()` with full message history + comprehensive system prompt; EL_ACTION instructions tightened |
+| `app/(tabs)/ai.tsx` | Destructures `chat` from `useAI()` instead of `complete`; passes full `data` slice into `AnswerContext`; useCallback dep array updated |
+
+### Hard rules added/reinforced this round
+
+- The chat-vs-complete distinction in `useAI` matters. If you need conversation history or a rich system prompt that varies per call, use `chat()`. Use `complete()` only for one-shot stateless calls (like `quickCapture` or `categorizeTxn`).
+- When expanding `AnswerContext`, also expand the call site in `app/(tabs)/ai.tsx`. The two are coupled; a new field on the interface is dead unless wired through.
+- `sanitizeForPrompt` MUST wrap every user-controlled string injected into the system prompt. New context fields added to `AnswerContext` must follow this pattern (see commit `dfcecee` for examples).
+
+### What's still open after Round-23
+
+- **Confirm Eddie is testing on a build that contains these fixes.** TestFlight `1.0.0 (4)` does not. Either build `1.0.0 (5)` and resubmit, or test via Metro dev-client (`npx expo start --dev-client`) which loads the latest JS without a fresh native build.
+- **Followup AI investigation** — separate codex session is checking for system prompt size issues, EL_ACTION regex mismatches, and `validateElAction` over-strictness.
+- **From Round-22, still pending**: per-provider data fetch hooks (Garmin/Oura/Fitbit), AI proxy deployment, npm audit triage, app icon/splash.
+
+### Test steps for `1.0.0 (5)` (after Round-23 fixes ship)
+
+1. `cd ElNative && eas build --profile production --platform ios`
+2. `eas submit --platform ios --latest`
+3. App Store Connect → TestFlight → Internal Testing → Team → Builds → +  → select `1.0.0 (5)` → Add
+4. Install on phone via TestFlight → Update
+5. Smoke-test:
+   - AI tab → record voice (should not error with 'frmt')
+   - AI tab → ask "what did I spend last week" (should reference actual transaction amounts/categories)
+   - AI tab → reply to AI's response (should remember context)
+   - AI tab → "log $12 coffee at starbucks" (should produce action card; tap Add → check Finance → Transactions for the new entry)
+
+
+---
+
+## 🎨 2026-05-12 — Round-24 (planned): UX research recommendations from Gemini Deep Research
+
+A Gemini Deep Research pass studied 19 competitor apps across El's domains (Copilot, Monarch Money, YNAB, Apple Wallet, Strong, Strava, Apple Fitness+, MyFitnessPal, Cronometer, Lifesum, Fantastical, Notion Calendar, Apple Calendar, ChatGPT, Claude iOS, Perplexity, Streaks, Things 3, Bear). The full report is in `uploads/El UX Competitor Research Report.md` on Eddie's local Cowork session.
+
+The recommendations below are PLANNED for Round-24 (post-Round-23 AI bug fixes). They will ship on a single branch `feat-ux-research-pass-2026-05-12` with one commit per item, mergeable independently if any item proves harder than expected. The current TestFlight build (1.0.0 (4) and the upcoming (5) with Round-23 fixes) does NOT include these — they're queued for the next round.
+
+### Top 5 high-impact patterns (ranked by impact-vs-effort)
+
+| # | Pattern | Source | Target tab(s) | Effort |
+|---|---|---|---|---|
+| B1 | Sticky horizontal category strips above transactions list, showing spent/budgeted per chip; tap to filter | Copilot | Finance → Transactions | Low |
+| B2 | Haptic long-press completion (350ms hold + circular progress fill + success haptic) for marking workouts/bills/plan items done | Streaks | Fitness, Finance Plan, Dashboard | Low |
+| B3 | Inline editable Action Cards in AI tab — Add an "Edit" button that opens an editable form with pre-filled action values, instead of forcing Add/Skip | ChatGPT | AI | Medium |
+| B4 | Perplexity-style suggested follow-up pills below assistant messages, AI-inferred from context | Perplexity | AI | Medium |
+| B5 | Real-time NLP tokenization in Schedule's add-event modal AND Finance's QuickCapture — animate parsed dates/amounts/times into highlighted preview fields as user types | Fantastical | Schedule, Finance | Medium |
+
+### Per-tab polish items (B6-B12, lower priority)
+
+| # | Item | Source |
+|---|---|---|
+| B6 | Tri-color bill status dots (paid/paid-different/upcoming) under Upcoming Bills on Dashboard | Monarch Money |
+| B7 | YNAB-style stark over-budget formatting: vivid red + minus sign showing deficit (e.g. "-$23 over") | YNAB |
+| B8 | Strong-style placeholder text in active workout log: previous week's reps/weight shown muted in input fields | Strong |
+| B9 | Inline rest timer that expands below the just-completed set in WorkoutSessionModal | Strong |
+| B10 | Floating macro header pinned to top of Nutrition Today tab so totals stay visible while scrolling food log | MyFitnessPal |
+| B11 | Cronometer-style progressive disclosure: tap macro rings → modal with detailed per-meal/micronutrient breakdown | Cronometer |
+| B12 | Notion-style drag-to-resize event blocks in Schedule day view, snap to 15-min grid with haptic ticks | Notion Calendar |
+
+### Cross-cutting patterns identified by the research
+
+- **Haptic hold mechanics** as a deliberate-completion alternative to simple taps for "earned" actions. Exploits the endowment effect; users feel actions are more real when they require sustained physical effort.
+- **Inline action cards over text-based confirmations** — when the AI takes an action, render a structured UI widget in-stream with Confirm/Edit/Cancel buttons rather than raw text the user has to parse.
+- **Citation/attribution chips** for AI-generated metrics — every claim ("you spent $400 on dining") should link back to the source data rows that justify it.
+
+### Things explicitly NOT to copy from the research
+
+- **No premium upsell banners** (MyFitnessPal does this aggressively — El has no IAP yet and shouldn't fake one)
+- **No social sharing or activity feed** (Strava's social UX assumes a community; El is single-user)
+- **No proprietary three-ring "Move/Exercise/Stand" metaphor** (Apple owns that mental model; El should use its own ring vocabulary)
+- **No anthropomorphic mascot characters** (Lifesum's playful illustrations clash with El's dark-first aesthetic)
+- **No external web search inside the AI** (preserves local-first/private positioning — Perplexity-style answer engine without the web crawl)
+- **No fully customizable drag-and-drop dashboard widget grid** (state-management overhead too high for single-developer indie app)
+- **No external calendar invitation/video-conferencing integration** (Zoom/Meet links require third-party API state — out of scope)
+
+### Open questions before Round-24 begins
+
+- Is `react-native-gesture-handler` installed at v2+ (required for B12 drag-resize)? Currently in package.json — verify version.
+- Do we want voice mode in the AI tab (continuous-listen + pulsating orb) or stick with the existing push-to-talk? Continuous-listen is a much bigger lift but matches modern AI UX.
+- For B5's NLP tokenization: should we extend `parseLocal()` from services/elAI.ts to handle more patterns (locations, recurrence, multiple amounts)? Current parser is minimal.
+
+### How Round-24 plays into Eddie's roadmap
+
+Round-23 closes out the bug-fix cycle from the first TestFlight install. Round-24 is the first "feature polish" round informed by real-world testing + competitive analysis. After Round-24, the next big workstreams (per Round-22 "still open" list) are:
+
+1. Per-provider data fetch hooks (Garmin/Oura/Fitbit) — enables the OAuth connections shipped in Round-22 to actually pull data
+2. AI proxy deployment + StoreKit IAP for the paid AI tier
+3. App icon + splash replacements (currently still Expo starter assets)
+4. App Store Connect App Privacy nutrition label + listing name reservation
+
