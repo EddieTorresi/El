@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-11 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification**)
+Last updated: 2026-05-11 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -1323,4 +1323,101 @@ mkdir .git\refs\heads\test-subdir; rmdir .git\refs\heads\test-subdir
 ```
 
 If `mkdir` errors, the FS still blocks subdirectories. If it succeeds, slash-named branches would work — but the hyphenated convention is fine to keep regardless.
+
+
+---
+
+## 🚀 2026-05-11 — Round-22: TestFlight launch readiness pass
+
+This round is the final batch of pre-launch work before sending the El TestFlight build to friends and family. Six branches shipped, each independently mergeable. All shipped on `master` via squash-merge in GitHub.
+
+### Branches shipped this round
+
+| Branch | Commit | What |
+|---|---|---|
+| `fix-ai-tab-key-entry` | (combined with Apple Health) | Restored inline Anthropic key entry in the AI tab — Round-10 had removed the user-facing path in anticipation of the proxy, but the proxy isn't deployed. AI tab dead-ended for testers. |
+| `feat-privacy-reset-all-data` | `08d3fdd` | `clearAllData()` now wipes every `el_*` AsyncStorage key + all SecureStore tokens (`el_anthropic_key`, `el_whisper_key`, `el_gcal_tokens`, `el_gcal_client_id`, `el_oauth_<provider>` for every entry in FITNESS_PROVIDERS, plus `el_creds_<provider>` after Round-22's wellness providers landed). Settings → Clear All Data alert text updated to mention API keys + connected services. |
+| `feat-privacy-explainer-page` | `f779103` | New `app/privacy.tsx` route — five-section plain-English explainer of how El handles data. Linked from Settings → top of screen above Profile. Route cast as `any` to match existing health-today-card pattern (typed routes regenerate on next expo start). |
+| `feat-privacy-faceid-gate` | `399a438` | Added `expo-local-authentication`. New `components/biometric-gate.tsx` wraps the navigation stack in `app/_layout.tsx`. Settings → Security toggle controls `settings.biometricLockEnabled` (default OFF). When enabled: cold-start prompt + relock after 5 min in background. Fail/cancel → Locked screen with Retry. If device has no enrolled biometric → fail-open (does not block). |
+| `feat-default-theme-dark` | `52a0783` | Default theme flipped from 'auto' to 'dark' for fresh installs in `DEFAULT_DATA.settings`. Existing users keep their saved preference because AsyncStorage's persisted settings take priority over DEFAULT_DATA in `sanitizeStored`. |
+| `feat-accessibility-labels-pass` | (4 commits) | 133 Pressables labeled across all 7 tabs. Added `accessibilityRole`, `accessibilityLabel`, `accessibilityState` (where selected/checked/expanded), and `accessibilityHint` (where the action isn't obvious). Per-tab counts: ai 7, fitness 8, schedule 12, index 10, nutrition 21, settings 24, finance 53. |
+| `feat-wellness-providers` | (latest) | Direct OAuth provider connect UI for Strava, Garmin, Oura, Fitbit. New `components/provider-connect-card.tsx` is a generic card that takes any `FitnessProviderConfig` and handles three states: no creds (entry form + docs link), has creds (Connect button), connected (Disconnect + Forget creds). Whoop deferred — their API requires app approval. Credentials live under `el_creds_<key>` in SecureStore parallel to `el_oauth_<key>` tokens. `ALLOWED_DEEP_LINK_HOSTS` expanded to include `oura`, `withings`, `mapmyrun`. |
+
+### AI tab fix — root cause documented
+
+The Round-10 design intent was: ship a deployed `aiProxyUrl` (server-side Anthropic proxy) so testers never need to enter their own keys. The user-facing key entry was removed in anticipation. The proxy was never deployed. Result: every tester opened the AI tab and saw "El AI is not configured in this app build yet" with no action available.
+
+The Round-22 fix is the smallest possible thing that restores a working AI tab without giving up on the proxy plan: when both `appServices.aiProxyUrl` and a saved Anthropic key are absent, the AI tab now renders an inline key entry form (same UX as the developer-fallback path Round-10 kept hidden). Once the proxy ships, this form will never show because `usesAppService` flips to true.
+
+### App.json change Round-22
+
+None. This round did NOT change `app.json` despite touching native modules, because expo-local-authentication's plugin entry is auto-managed when you run `npx expo install`. The bundle id, scheme, slug, and HealthKit plugin entry from prior rounds are unchanged.
+
+### Native rebuild required after this round
+
+The expo-local-authentication install is a native binding. To test the FaceID gate (and to ship Round-22 as a TestFlight build), you need a fresh dev build:
+
+```
+cd ElNative
+eas build --profile development --platform ios   # for direct install on Eddie's phone
+eas build --profile production --platform ios    # for TestFlight upload
+```
+
+Hot-reload from Metro will not surface the FaceID prompt on existing builds — they don't have the native module linked.
+
+### Privacy policy
+
+`docs/PRIVACY_POLICY.md` written in this repo. Plain English, ~1500 words. Covers what data El collects (none on a server; everything stays on phone), what leaves the phone (Anthropic AI requests, OpenAI Whisper transcription, OAuth provider syncs you've opted into, Google Calendar event additions you tap), what El does NOT do (no ads, no analytics SDKs, no telemetry), and how to wipe everything.
+
+For App Store Connect submission: the policy must be reachable at a public HTTPS URL. After this commit lands on `main`, GitHub Pages should serve it at:
+
+```
+https://eddietorresi.github.io/El/docs/PRIVACY_POLICY.md
+```
+
+Paste that URL into App Store Connect → App Information → Privacy Policy URL.
+
+### Security audit — Round-22 findings
+
+Grep results after Round-22 work, against the ElNative tree:
+
+- ✅ No `Object.assign(.*JSON.parse(...))` patterns — all parsed data goes through `_safeMerge` / `sanitizeStored`.
+- ✅ No `JSON.parse` on credential or token strings without validator. Token shape validation lives in `useOAuthProvider.isValidPersistedTokens`. Provider creds go through a typeof-guarded parse in `provider-connect-card.tsx::loadCreds`.
+- ✅ No hardcoded API keys, OAuth tokens, or bearer strings (`sk-ant-`, `sk-proj-`, `ya29.`, `Bearer `) anywhere in the source tree.
+- ✅ Accessibility labels: 133 Pressables across 7 tabs labeled. The 2 unlabeled remainders (`schedule.tsx` keyboard-dismiss overlay, `settings.tsx` decorative wrapper) are intentional — they aren't interactive button-shaped surfaces.
+- ⚠️ **`npm audit` reported 4 MODERATE-severity vulnerabilities** after `npx expo install expo-local-authentication`. Specifics not captured this round — Eddie should run `npm audit` (without `--force`) and paste the output so the next round can either patch them or document why they're false positives. Most Expo dev-time deps surface noisy moderates that don't reach the iOS bundle, but verify before relying on that.
+
+### Hard rules added or reinforced this round
+
+- New SecureStore key prefix `el_creds_<provider>` joins the existing `el_oauth_<provider>` family. **`clearAllData()` must clear both** for every provider in `FITNESS_PROVIDERS`. Do not regress the `Promise.all` over `Object.values(FITNESS_PROVIDERS).flatMap(...)` in `hooks/useElData.ts`.
+- New deep-link hosts `oura`, `withings`, `mapmyrun` joined `ALLOWED_DEEP_LINK_HOSTS` in `app/_layout.tsx`. Per Round-3 security rule, every new OAuth provider host must be added there. The list is now: `strava, fitbit, googlefit, googlecalendar, whoop, polar, garmin, oura, withings, mapmyrun`.
+- `expo-local-authentication` is the only new native module added this round. The biometric gate fails open on devices without enrolled biometric — this is intentional Apple-style UX for opt-in app-level locks. Do not change to fail-closed without thinking through the lockout case.
+
+### What's still open after Round-22
+
+- **Per-provider data fetch hooks** (useGarmin / useOura / useFitbit) — only the OAuth connect path shipped. Pulling activity data from each provider's API and surfacing it on the Fitness tab is a future round.
+- **AI proxy deployment** — when this ships, the inline key entry in `app/(tabs)/ai.tsx` becomes vestigial. Don't delete it; just verify `usesAppService` correctly hides it once the proxy URL is set in `appServices.aiProxyUrl`.
+- **`npm audit fix`** — read the `npm audit` JSON, decide per-finding whether to patch or document an exception. Avoid `--force`.
+- **Whoop integration** — needs WHOOP developer access (gated). Apply at https://developer.whoop.com when ready.
+- **App Store icon + splash** — still using Expo starter assets (`assets/images/icon.png` is the blue Expo "A"). Replace before public launch. Any asset change requires a new native build.
+- **App Store Connect listing name** — currently `El (3a10f3)` because the exact name `El` was reserved. Cosmetic only; can change later via App Store Connect.
+
+### Files touched this round
+
+| File | Round-22 change |
+|---|---|
+| `app/(tabs)/ai.tsx` | Inline key-entry form when neither `usesAppService` nor `hasKey` is true; styles for `keyInput`, `keyError`, `keySaveBtn`, `keySaveLabel`, `keyHelp`. Plus 7 a11y labels. |
+| `app/(tabs)/settings.tsx` | Privacy link card at top; Security section with FaceID toggle; "Direct Provider Sync (advanced)" subsection mounting 4 ProviderConnectCards; expanded Clear All Data Alert text; useRouter import. Plus 24 a11y labels. |
+| `app/(tabs)/finance.tsx` | 53 a11y labels (no functional change) |
+| `app/(tabs)/fitness.tsx` | 8 a11y labels (no functional change) |
+| `app/(tabs)/schedule.tsx` | 12 a11y labels (no functional change) |
+| `app/(tabs)/index.tsx` | 10 a11y labels (no functional change) |
+| `app/(tabs)/nutrition.tsx` | 21 a11y labels (no functional change) |
+| `app/_layout.tsx` | Wraps stack in `<BiometricGate>`; expanded `ALLOWED_DEEP_LINK_HOSTS`. |
+| `app/privacy.tsx` | New file — Privacy & Your Data explainer screen. |
+| `components/biometric-gate.tsx` | New file — opt-in Face ID / passcode launch gate. |
+| `components/provider-connect-card.tsx` | New file — generic OAuth provider connect UI. |
+| `hooks/useElData.ts` | `biometricLockEnabled` field on AppSettings; `clearAllData()` wipes all `el_*` AsyncStorage keys + all SecureStore tokens + creds; default theme = 'dark'. |
+| `package.json` + `package-lock.json` | `expo-local-authentication` added. |
+| `docs/PRIVACY_POLICY.md` (this repo) | New file — App Store privacy policy markdown. |
 
