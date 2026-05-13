@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-12 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass** + **Round-23 post-TestFlight bug fixes** + **Round-24 AI followup + UX research implementation**)
+Last updated: 2026-05-13 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass** + **Round-23 post-TestFlight bug fixes** + **Round-24 AI followup + UX research implementation** + **Round-25 build 6-8 testing fixes** + **Round-26 clear-data reset + Health tab merge**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -1636,11 +1636,11 @@ Eddie tested TestFlight builds 6, 7, and 8 (which is the same code as 7 — acci
 |---|---|---|---|
 | 14 | Face ID / passcode lock toggle doesn't engage the gate on devices with no enrolled biometric | `useEffect` probe used `isEnrolledAsync()` which returns false for passcode-only users → my code set `supported=false` → fail-open → no lock at all. | ✅ Fixed (`getEnrolledLevelAsync() >= 1` instead; also explicit `disableDeviceFallback: false`) |
 | 15 | Deleting the El app and reinstalling didn't fully wipe data | iOS Keychain (SecureStore backing) persists across app deletion + reinstall by default. AsyncStorage gets wiped, Keychain does not. Privacy policy promises full wipe — that wasn't true. | ✅ Fixed (fresh-install detection in `ElDataProvider`: if AsyncStorage has no `el_data` on launch, also wipe all known SecureStore keys + per-provider `el_oauth_*` and `el_creds_*`) |
-| 16 | Tap "Clear All Data" → service cards still show as Connected until force-quit | `useOAuthProvider` + `useAppleHealth` cache their token/connected state in `useState`. `clearAllData` wipes the underlying SecureStore/AsyncStorage but doesn't reset the in-memory state. UI lags reality until next mount. | ⚠️ Partial fix (alert text updated to tell user to force-quit). **Real fix queued for Round-26** — event-bus pattern so clearAllData broadcasts and hooks reset themselves. |
+| 16 | Tap "Clear All Data" → service cards still show as Connected until force-quit | `useOAuthProvider` + `useAppleHealth` cache their token/connected state in `useState`. `clearAllData` wipes the underlying SecureStore/AsyncStorage but doesn't reset the in-memory state. UI lags reality until next mount. | ✅ Fixed on Round-26 branch `fix-clear-all-data-event-bus` — event-bus pattern so clearAllData broadcasts and hooks reset themselves. |
 | 17 | Importing spreadsheet auto-populated budget category allocations with the recurring expense amounts (so user's "budget" mirrored their bills) | `handleImport` in `app/(tabs)/settings.tsx` line 690 — when "Recurring Expenses" toggle was on, it ALSO replaced budget categories with categories whose `allocated` was set from the recurring amounts. Conflated bills (fixed obligations) with budget (discretionary intentions). | ✅ Fixed — import now brings in category NAMES from the tracker but resets `allocated` to 0. User fills in their real budget afterward in Finance → Budget. |
 | 18 | Settings → Monthly Budget and Finance → Budget tab showed different numbers | Same root cause as #17 — Settings showed `data.budget.monthly` (set from Income sheet) while Finance "By Category" total was sum of `categories[].allocated` (set from Recurring sheet). Two different sources of truth disagreed. | ✅ Indirectly fixed via #17 — fresh imports now have allocated=0 across categories; user sees Settings cap vs allocated sum as two distinct concepts with clear labels. **Existing data needs re-import or manual cleanup.** |
-| 19 | Apple Health stays Connected after Clear All Data even after force-quit | `clearAllData` correctly clears the AsyncStorage `el_apple_health_connected` flag, but iOS HealthKit's OS-level permission grant persists (only user can revoke via iOS Settings). On next focus, `useAppleHealth` re-probes HealthKit and re-marks itself connected. There's no "manually disconnected by user" flag that the hook respects. | 🔄 **Open — handed to codex** (branch `fix-clear-all-data-event-bus`). Plan: add `manually_disconnected` flag in AsyncStorage + event-bus pattern so clearAllData broadcasts 'el:cleared' and `useAppleHealth` + `useOAuthProvider` reset themselves immediately. |
-| 20 | Bottom tab bar has 7 tabs (Dashboard / Finance / Fitness / Nutrition / Schedule / AI / Settings) — too many; Fitness + Nutrition should merge | UX design choice, not a bug. iOS recommends ≤5 tabs in the bottom bar for thumb reach; El at 7 is cramped. Apple's own Health app groups these data types together. | 🔄 **Open — handed to codex** (branch `feat-merge-health-tab`). Plan: merge Fitness + Nutrition into single "Health" tab with internal segment control ("Workouts" / "Nutrition"). New tab order: Dashboard / Finance / Health / Schedule / AI / Settings. Icon: heart.fill. Default sub-tab: Workouts. |
+| 19 | Apple Health stays Connected after Clear All Data even after force-quit | `clearAllData` correctly clears the AsyncStorage `el_apple_health_connected` flag, but iOS HealthKit's OS-level permission grant persists (only user can revoke via iOS Settings). On next focus, `useAppleHealth` re-probes HealthKit and re-marks itself connected. There's no "manually disconnected by user" flag that the hook respects. | ✅ Fixed on Round-26 branch `fix-clear-all-data-event-bus` — `el_apple_health_manually_disconnected` prevents silent re-connect until the user taps Connect again. |
+| 20 | Bottom tab bar has 7 tabs (Dashboard / Finance / Fitness / Nutrition / Schedule / AI / Settings) — too many; Fitness + Nutrition should merge | UX design choice, not a bug. iOS recommends ≤5 tabs in the bottom bar for thumb reach; El at 7 is cramped. Apple's own Health app groups these data types together. | ✅ Fixed on Round-26 branch `feat-merge-health-tab` — new Health tab with Workouts / Nutrition segment. |
 
 ### Branches shipped this round (Round-25)
 
@@ -1652,8 +1652,8 @@ Eddie tested TestFlight builds 6, 7, and 8 (which is the same code as 7 — acci
 
 | Branch | Status | What |
 |---|---|---|
-| `fix-clear-all-data-event-bus` | Delegated to codex | Bug 16 real fix + Bug 19. Event-bus pattern using react-native `DeviceEventEmitter`. `clearAllData` emits `el:cleared`; `useAppleHealth` + `useOAuthProvider` listen, reset their useState. Plus a `manually_disconnected` flag in AsyncStorage for Apple Health so OS-level HealthKit grant doesn't auto-reconnect. |
-| `feat-merge-health-tab` | Delegated to codex | Bug 20. Merge Fitness + Nutrition tabs into single Health tab with internal segment control. |
+| `fix-clear-all-data-event-bus` | Completed by codex; pushed for PR | Bug 16 real fix + Bug 19. Event-bus pattern using react-native `DeviceEventEmitter`. `clearAllData` emits `el:cleared`; `useAppleHealth` + `useOAuthProvider` listen, reset their useState. Plus a `manually_disconnected` flag in AsyncStorage for Apple Health so OS-level HealthKit grant doesn't auto-reconnect. |
+| `feat-merge-health-tab` | Completed by codex; pushed for PR | Bug 20. Merge Fitness + Nutrition tabs into single Health tab with internal segment control. |
 
 ### Codex prompts for the delegated work
 
@@ -1667,14 +1667,67 @@ A combined codex prompt covering both delegated branches (Phase A = event bus / 
 | `1.0.0 (5)` | Shipped → tested | Contains Round-23 AI + voice fixes. AI symptoms persisted; led to Round-23a. |
 | `1.0.0 (6)` | Shipped → tested | Contains Round-23 + Round-23a. AI working correctly. Surfaced Round-25 biometric, Keychain-persistence, Clear-All-Data, and budget-from-recurring bugs. |
 | `1.0.0 (7)` | Accidentally double-built; same code as (8). Skipped. | — |
-| `1.0.0 (8)` | Latest — contains Round-25 first batch of fixes | Apple Health disconnect + Health tab merge still pending. Next build will be `1.0.0 (9)` once Round-26 (codex delegated) lands. |
+| `1.0.0 (8)` | Latest installed/tested build at start of Round-26 | Contains Round-25 first batch of fixes. It does NOT contain the Round-26 clear-data event bus or Health tab merge until those PRs are merged and a new build is made. Next build should be `1.0.0 (9)`. |
 
 ### Hard rules added/reinforced this round
 
 - **`isEnrolledAsync()` is NOT a proxy for "device is securely locked."** It only checks biometric enrollment. For "user can authenticate at all" use `getEnrolledLevelAsync() >= 1`. Document this in any future biometric or auth code.
 - **iOS Keychain persists across app deletion.** Privacy claims of "deleting the app removes all data" require an explicit wipe on fresh-install detection. See `hooks/useElData.ts::ElDataProvider` for the canonical implementation — when `AsyncStorage.getItem(STORAGE_KEY)` returns null on mount, sweep all known SecureStore keys.
-- **In-memory hook state survives `clearAllData`.** Don't assume wiping AsyncStorage + SecureStore is enough — caching hooks like `useOAuthProvider`, `useAppleHealth`, `useAI` need explicit reset signals. Round-26 will add the event-bus pattern as the canonical solution.
+- **In-memory hook state survives `clearAllData`.** Don't assume wiping AsyncStorage + SecureStore is enough — caching hooks like `useOAuthProvider`, `useAppleHealth`, `useAI` need explicit reset signals. Round-26 adds the event-bus pattern as the canonical solution.
 - **Spreadsheet import budget allocations now start at 0.** Don't regress to copying recurring amounts into `BudgetCategory.allocated` — that conflates fixed obligations with discretionary intentions. The fix is in `handleImport` in `app/(tabs)/settings.tsx`.
+
+---
+
+## ✅ 2026-05-13 — Round-26: Clear-data reset + Health tab merge
+
+Eddie is currently testing TestFlight `1.0.0 (8)`. The work below is code-complete on branches and must be merged, then built as the next TestFlight build (expected `1.0.0 (9)`) before it can be tested on-device.
+
+### Branches produced
+
+| Branch | Commit | Status | What |
+|---|---|---|---|
+| `fix-clear-all-data-event-bus` | `e66eeb3` | Pushed to origin; merge first | Adds the canonical clear-data event bus and makes connected hooks reset immediately after Settings -> Clear All Data. |
+| `feat-merge-health-tab` | `39413c7` | Pushed to origin; stacked on `fix-clear-all-data-event-bus`; merge second | Replaces separate Fitness/Nutrition bottom tabs with one Health tab and internal Workouts/Nutrition segment. |
+
+### Clear All Data reset behavior
+
+- New `utils/elEvents.ts` exports `EL_CLEARED_EVENT`, `emitElCleared()`, and `addElClearedListener()` using React Native `DeviceEventEmitter`.
+- `hooks/useElData.ts::clearAllData()` now emits `el:cleared` after wiping local data and resetting in-memory app data.
+- `hooks/useAppleHealth.ts` listens for `el:cleared`, immediately clears its connected/authorized UI state, and writes `el_apple_health_manually_disconnected`.
+- `useAppleHealth` now respects `el_apple_health_manually_disconnected` during its initial/focus probes, so iOS HealthKit's OS-level permission grant does not silently reconnect El after Clear All Data.
+- Tapping Connect Apple Health clears the manual-disconnect flag before requesting HealthKit authorization again.
+- `hooks/useOAuthProvider.ts` listens for `el:cleared` and resets in-memory OAuth token/loading/error state for provider cards.
+- `hooks/useAI.ts` also listens for `el:cleared` and clears the cached Anthropic-key state after SecureStore is wiped.
+- Settings success copy no longer tells users to force-quit; the UI should update immediately after Clear All Data.
+- The branch also preserves the local Round-25 privacy fixes that were present but uncommitted on master at codex handoff: passcode-capable biometric gate support and fresh-install SecureStore wipe.
+
+Manual test after merge/build:
+1. Connect Apple Health.
+2. Settings -> Clear All Data -> Delete everything.
+3. Apple Health and OAuth provider cards should immediately show disconnected/not connected without force-quitting.
+4. Tap Connect Apple Health again. The manual-disconnect flag should clear and the normal HealthKit authorization flow should run.
+
+### Health tab merge behavior
+
+- New `app/(tabs)/health.tsx` is the visible Health bottom-tab route.
+- `app/(tabs)/_layout.tsx` visible tab order is now Dashboard / Finance / Health / Schedule / AI / Settings.
+- Legacy `fitness` and `nutrition` routes remain registered with `href: null` so they do not appear in the tab bar but remain safe for any stale internal route references.
+- `app/(tabs)/fitness.tsx` and `app/(tabs)/nutrition.tsx` now accept `embedded?: boolean` so the Health container can render them without nested safe-area title chrome.
+- Health defaults to Workouts and supports `?section=workouts|nutrition`.
+- Dashboard quick actions now route to `/(tabs)/health?section=workouts` and `/(tabs)/health?section=nutrition`.
+- `components/ui/icon-symbol.tsx` maps `heart.fill` to Material Icons `favorite` for the Health tab icon.
+
+Verification run by codex before pushing:
+- `npx.cmd tsc --noEmit` passed on `fix-clear-all-data-event-bus`.
+- Tail/truncation checks passed for `utils/elEvents.ts`, `hooks/useAppleHealth.ts`, `hooks/useOAuthProvider.ts`, `hooks/useAI.ts`, `hooks/useElData.ts`, `app/(tabs)/settings.tsx`, and `components/biometric-gate.tsx`.
+- `npx.cmd tsc --noEmit` passed on `feat-merge-health-tab`.
+- Tail/truncation checks passed for `app/(tabs)/health.tsx`, `app/(tabs)/fitness.tsx`, `app/(tabs)/nutrition.tsx`, `app/(tabs)/_layout.tsx`, `app/(tabs)/index.tsx`, and `components/ui/icon-symbol.tsx`.
+
+### Merge/build notes
+
+- Merge order matters: merge `fix-clear-all-data-event-bus` first, then `feat-merge-health-tab`.
+- Build `1.0.0 (8)` will still show old behavior. Eddie needs a new EAS/TestFlight build after both PRs merge.
+- Do not reintroduce "force quit" guidance for Clear All Data. In-memory reset is now part of the app contract.
 
 ---
 
@@ -1725,4 +1778,3 @@ Drawing a line in the sand. The following are common in modern apps but actively
 5. **No premium upsell banners** (when/if El gets an IAP tier later, the paywall must be discrete and never interrupt core workflow).
 6. **No anthropomorphic mascot characters or playful illustrations** (clashes with dark-first sophisticated aesthetic).
 7. **No external web search inside the AI** (preserves privacy + local-first positioning).
-
