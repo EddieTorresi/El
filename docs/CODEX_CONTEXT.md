@@ -1576,3 +1576,153 @@ Round-23 closes out the bug-fix cycle from the first TestFlight install. Round-2
 2. AI proxy deployment + StoreKit IAP for the paid AI tier
 3. App icon + splash replacements (currently still Expo starter assets)
 4. App Store Connect App Privacy nutrition label + listing name reservation
+
+---
+
+## ✅ 2026-05-12 — Round-23a: AI followup fixes (shipped)
+
+After Round-23's first AI patch (commit `dfcecee` — wired chat history + expanded context), Eddie tested on TestFlight build 5 and reported the AI was "still having issues." A delegated codex session investigated and shipped a followup.
+
+**Commit `0c24caf` on branch `fix-ai-followup-2026-05-12`** (squash-merged to master):
+
+- **Tolerant EL_ACTION parser** — earlier regex `/EL_ACTION:\s*(\{[\s\S]*?\})\s*$/` required the JSON at end-of-string. Models sometimes append a sentence after the JSON ("EL_ACTION: {...}\n\nLet me know if you want anything else!"). Replaced with a balanced-brace scanner that works wherever the JSON sits in the response.
+- **Less brittle validation** — `validateElAction` was too strict (e.g. rejected `"Expense"` capitalized). Added case-insensitive matching on txType and accepted common date formats beyond strict YYYY-MM-DD.
+- **Dev warnings** — added `warnAIValidation()` helper that surfaces silent validator rejections during `__DEV__` so future regressions are visible.
+- **Higher response budget** — bumped `maxTokens` from 700 to 1500 so model has room for a reasoning paragraph + EL_ACTION + optional SUGGESTIONS.
+- **Last-7-days finance context** — added a per-week spending summary on top of the per-month one for better short-term context.
+
+After this round, AI behavior in build 6+ is stable: data context works, multi-turn memory works, action emission reliably produces valid `ElAction` objects, edit-before-save flow works.
+
+---
+
+## 🎨 2026-05-12 — Round-24: UX research pass (shipped)
+
+Implemented the top 5 patterns + one polish item from the Gemini Deep Research competitor UX report. Branch `feat-ux-research-pass-2026-05-12` was stacked on the AI followup branch; required a manual PowerShell squash-merge after a stacked-branch conflict in `services/elAI.ts` (both sides were UX additions — kept both).
+
+**Shipped commits** (squash-merged to master):
+
+| ID | Pattern | Source | Commit | Files touched |
+|---|---|---|---|---|
+| B1 | Sticky horizontal category strip filter on Transactions list | Copilot | `db7c5f7` | `app/(tabs)/finance.tsx` |
+| B2 | Haptic long-press completion (350ms hold + circular fill + success haptic) for workout sets, plan items, paid bills | Streaks | `70bb4f9` | new `components/haptic-hold-button.tsx`; wired into 3 call sites |
+| B3 | Editable AI action cards — "Edit" button opens inline form pre-filled with parsed values | ChatGPT | `e21d83e` | `app/(tabs)/ai.tsx` |
+| B4 | Suggested follow-up pills below assistant messages | Perplexity | `772f295` | `services/elAI.ts` (system prompt + `extractSuggestionsPayload`); `app/(tabs)/ai.tsx` (render) |
+| B5 | Real-time NLP parse preview in Schedule's add-event modal AND Finance Quick Capture | Fantastical | `3550d93` | new `utils/naturalLanguageParse.ts`; new `components/parse-live-preview.tsx`; wired into Schedule + Dashboard |
+| B7 | Over-budget deficit text ("-$23 over") in vivid red instead of just turning the chip red | YNAB | `857ebfc` | `app/(tabs)/finance.tsx` |
+
+**Deferred** (lower priority + need product decisions):
+- B6 tri-color bill status dots (Monarch)
+- B8 Strong-style placeholder text in active workout log
+- B9 inline rest timer in WorkoutSessionModal
+- B10 floating macro header (MyFitnessPal)
+- B11 Cronometer-style progressive disclosure for macros
+- B12 Notion-style drag-to-resize event blocks
+
+### Conflict resolution this round
+
+The UX branch was created on top of the AI followup branch's original (pre-squash) commits. When the AI followup was squash-merged to master, the UX branch's history still referenced the old commit SHAs. GitHub couldn't auto-merge. Resolution: `git merge --squash origin/feat-ux-research-pass-2026-05-12` from PowerShell on a fresh master, then manually fixed two conflict blocks in `services/elAI.ts` (both blocks were UX-side additions of `sanitizeFollowUps` / `extractSuggestionsPayload` + their call site — kept the UX side since the return statement on master already referenced `suggestions.followUps`).
+
+Lesson for future stacked branches: always rebase the child branch onto master after the parent merges, before opening the PR. Or just don't stack — branch each from master.
+
+---
+
+## 🐛 2026-05-12 — Round-25: Build 6-8 testing bug fixes
+
+Eddie tested TestFlight builds 6, 7, and 8 (which is the same code as 7 — accidental double-build). Real bugs surfaced from real use. This round patches them.
+
+### Bugs reported from real-world testing
+
+| # | Symptom | Root cause | Status |
+|---|---|---|---|
+| 14 | Face ID / passcode lock toggle doesn't engage the gate on devices with no enrolled biometric | `useEffect` probe used `isEnrolledAsync()` which returns false for passcode-only users → my code set `supported=false` → fail-open → no lock at all. | ✅ Fixed (`getEnrolledLevelAsync() >= 1` instead; also explicit `disableDeviceFallback: false`) |
+| 15 | Deleting the El app and reinstalling didn't fully wipe data | iOS Keychain (SecureStore backing) persists across app deletion + reinstall by default. AsyncStorage gets wiped, Keychain does not. Privacy policy promises full wipe — that wasn't true. | ✅ Fixed (fresh-install detection in `ElDataProvider`: if AsyncStorage has no `el_data` on launch, also wipe all known SecureStore keys + per-provider `el_oauth_*` and `el_creds_*`) |
+| 16 | Tap "Clear All Data" → service cards still show as Connected until force-quit | `useOAuthProvider` + `useAppleHealth` cache their token/connected state in `useState`. `clearAllData` wipes the underlying SecureStore/AsyncStorage but doesn't reset the in-memory state. UI lags reality until next mount. | ⚠️ Partial fix (alert text updated to tell user to force-quit). **Real fix queued for Round-26** — event-bus pattern so clearAllData broadcasts and hooks reset themselves. |
+| 17 | Importing spreadsheet auto-populated budget category allocations with the recurring expense amounts (so user's "budget" mirrored their bills) | `handleImport` in `app/(tabs)/settings.tsx` line 690 — when "Recurring Expenses" toggle was on, it ALSO replaced budget categories with categories whose `allocated` was set from the recurring amounts. Conflated bills (fixed obligations) with budget (discretionary intentions). | ✅ Fixed — import now brings in category NAMES from the tracker but resets `allocated` to 0. User fills in their real budget afterward in Finance → Budget. |
+| 18 | Settings → Monthly Budget and Finance → Budget tab showed different numbers | Same root cause as #17 — Settings showed `data.budget.monthly` (set from Income sheet) while Finance "By Category" total was sum of `categories[].allocated` (set from Recurring sheet). Two different sources of truth disagreed. | ✅ Indirectly fixed via #17 — fresh imports now have allocated=0 across categories; user sees Settings cap vs allocated sum as two distinct concepts with clear labels. **Existing data needs re-import or manual cleanup.** |
+| 19 | Apple Health stays Connected after Clear All Data even after force-quit | `clearAllData` correctly clears the AsyncStorage `el_apple_health_connected` flag, but iOS HealthKit's OS-level permission grant persists (only user can revoke via iOS Settings). On next focus, `useAppleHealth` re-probes HealthKit and re-marks itself connected. There's no "manually disconnected by user" flag that the hook respects. | 🔄 **Open — handed to codex** (branch `fix-clear-all-data-event-bus`). Plan: add `manually_disconnected` flag in AsyncStorage + event-bus pattern so clearAllData broadcasts 'el:cleared' and `useAppleHealth` + `useOAuthProvider` reset themselves immediately. |
+| 20 | Bottom tab bar has 7 tabs (Dashboard / Finance / Fitness / Nutrition / Schedule / AI / Settings) — too many; Fitness + Nutrition should merge | UX design choice, not a bug. iOS recommends ≤5 tabs in the bottom bar for thumb reach; El at 7 is cramped. Apple's own Health app groups these data types together. | 🔄 **Open — handed to codex** (branch `feat-merge-health-tab`). Plan: merge Fitness + Nutrition into single "Health" tab with internal segment control ("Workouts" / "Nutrition"). New tab order: Dashboard / Finance / Health / Schedule / AI / Settings. Icon: heart.fill. Default sub-tab: Workouts. |
+
+### Branches shipped this round (Round-25)
+
+| Branch | Commit | Files | What |
+|---|---|---|---|
+| `fix-build6-issues-1-3-5` (or similar — Eddie merged with combined name) | (one squash on master) | `hooks/useElData.ts`, `components/biometric-gate.tsx`, `app/(tabs)/settings.tsx` | Bugs 14, 15, 16 (partial), 17 |
+
+### Branches in flight (Round-25 → Round-26)
+
+| Branch | Status | What |
+|---|---|---|
+| `fix-clear-all-data-event-bus` | Delegated to codex | Bug 16 real fix + Bug 19. Event-bus pattern using react-native `DeviceEventEmitter`. `clearAllData` emits `el:cleared`; `useAppleHealth` + `useOAuthProvider` listen, reset their useState. Plus a `manually_disconnected` flag in AsyncStorage for Apple Health so OS-level HealthKit grant doesn't auto-reconnect. |
+| `feat-merge-health-tab` | Delegated to codex | Bug 20. Merge Fitness + Nutrition tabs into single Health tab with internal segment control. |
+
+### Codex prompts for the delegated work
+
+A combined codex prompt covering both delegated branches (Phase A = event bus / Apple Health, Phase B = Health tab merge) was given to Eddie. Both branches are expected to land within one codex session.
+
+### Build progression this round
+
+| Build | Status | Notes |
+|---|---|---|
+| `1.0.0 (4)` | Old | Pre-Round-23 AI fixes. AI tab dead-ended (no key entry). |
+| `1.0.0 (5)` | Shipped → tested | Contains Round-23 AI + voice fixes. AI symptoms persisted; led to Round-23a. |
+| `1.0.0 (6)` | Shipped → tested | Contains Round-23 + Round-23a. AI working correctly. Surfaced Round-25 biometric, Keychain-persistence, Clear-All-Data, and budget-from-recurring bugs. |
+| `1.0.0 (7)` | Accidentally double-built; same code as (8). Skipped. | — |
+| `1.0.0 (8)` | Latest — contains Round-25 first batch of fixes | Apple Health disconnect + Health tab merge still pending. Next build will be `1.0.0 (9)` once Round-26 (codex delegated) lands. |
+
+### Hard rules added/reinforced this round
+
+- **`isEnrolledAsync()` is NOT a proxy for "device is securely locked."** It only checks biometric enrollment. For "user can authenticate at all" use `getEnrolledLevelAsync() >= 1`. Document this in any future biometric or auth code.
+- **iOS Keychain persists across app deletion.** Privacy claims of "deleting the app removes all data" require an explicit wipe on fresh-install detection. See `hooks/useElData.ts::ElDataProvider` for the canonical implementation — when `AsyncStorage.getItem(STORAGE_KEY)` returns null on mount, sweep all known SecureStore keys.
+- **In-memory hook state survives `clearAllData`.** Don't assume wiping AsyncStorage + SecureStore is enough — caching hooks like `useOAuthProvider`, `useAppleHealth`, `useAI` need explicit reset signals. Round-26 will add the event-bus pattern as the canonical solution.
+- **Spreadsheet import budget allocations now start at 0.** Don't regress to copying recurring amounts into `BudgetCategory.allocated` — that conflates fixed obligations with discretionary intentions. The fix is in `handleImport` in `app/(tabs)/settings.tsx`.
+
+---
+
+## 📋 2026-05-12 — Open product decisions (from Gemini UX research)
+
+These are decisions only Eddie can make. Each one shapes future rounds. None block current TestFlight testing.
+
+### 1. Aesthetic identity — Utility vs Prosumer
+
+Should El feel like a native, invisible extension of iOS (Apple Wallet / Apple Calendar — UI recedes into the background), OR like a "prosumer" indie app (Copilot / Things 3 — strong opinionated visual brand, custom fonts, distinct identity)?
+
+Current state: closer to Apple-utility. Dark theme, system fonts, blue accent.
+
+This decision shapes Round-26+ visual polish work.
+
+### 2. AI autonomy level
+
+Does Claude get to proactively notify the user (local push notifications: "you've spent $200 on dining out this week, want to talk?") OR does it remain entirely passive (wait silently in AI tab until summoned)?
+
+Bigger decision than it sounds — proactive AI requires:
+- iOS push notification permissions
+- Scheduled local-notification triggers
+- "Insight-of-the-day" generation infrastructure
+- Settings for users to control frequency / opt out
+
+### 3. Information density tolerance
+
+Will El's friends-and-family test group tolerate a high-density Monarch-style dashboard (lots visible at once, requires learning curve) OR must El use Cronometer-style progressive disclosure (rings on the front, tap for detail)?
+
+Current dashboard is between the two extremes. The right answer depends on actual user behavior — wait for tester feedback.
+
+### 4. Error state styling for OAuth failures
+
+When Strava/Garmin/Oura sync fails, do we show an inline red banner in the affected tab (utility approach) OR have the AI surface it conversationally ("Hey, your Strava connection failed earlier — reconnect?") (premium AI-first approach)?
+
+The second is on-brand for the AI-first positioning but is more code.
+
+---
+
+## 🚫 2026-05-12 — UX anti-patterns to never adopt (from Gemini research)
+
+Drawing a line in the sand. The following are common in modern apps but actively conflict with El's positioning. Codex / any AI assistant working on this repo should reject PRs that introduce any of these.
+
+1. **No skeleton loaders, spinning wheels, or artificial delays.** El's storage is local; data retrieval is instantaneous. Loading UI is a crutch for network latency we don't have. Tap should snap.
+2. **No social feeds, leaderboards, badges, "level up" mechanics.** Conflicts with private/introspective positioning. Strava-style activity feeds, MyFitnessPal community, Apple Fitness "Awards" — all out.
+3. **No modal hijacking or interstitial nag screens.** Full-screen "rate the app" or "upgrade" prompts. The Privacy explainer page is fine (linked from Settings, opt-in). Onboarding tutorial, if ever built, must be dismissible-card pattern not blocking modal.
+4. **No "cloud" / "syncing" / "refreshing" icons.** El has no cloud. The UI should project absolute permanence — what you see is what's on the device.
+5. **No premium upsell banners** (when/if El gets an IAP tier later, the paywall must be discrete and never interrupt core workflow).
+6. **No anthropomorphic mascot characters or playful illustrations** (clashes with dark-first sophisticated aesthetic).
+7. **No external web search inside the AI** (preserves privacy + local-first positioning).
+
