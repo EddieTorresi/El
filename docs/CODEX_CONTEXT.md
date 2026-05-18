@@ -1,6 +1,6 @@
 # El — Codex Technical Context
 
-Last updated: 2026-05-13 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass** + **Round-23 post-TestFlight bug fixes** + **Round-24 AI followup + UX research implementation** + **Round-25 build 6-8 testing fixes** + **Round-26 clear-data reset + Health tab merge**)
+Last updated: 2026-05-13 (rounds 1-8 + Round-9 deployment + Round-10 app-owned connection cleanup + Apple Health wording cleanup + **Round-13 Apple Health full integration** + **Round-14/15/16 native polish + Apple Health data view** + **Round-17 sandbox git-cache warning** + **Round-18 Apple Health visibility + Budget dark-mode chip fix** + **Round-19 TestFlight/EAS current state** + **Round-20 Apple Health connection state sync** + **Round-21 git safety verification + abort marker clarification** + **Round-22 TestFlight launch readiness pass** + **Round-23 post-TestFlight bug fixes** + **Round-24 AI followup + UX research implementation** + **Round-25 build 6-8 testing fixes** + **Round-26 clear-data reset + Health tab merge** + **Round-27 Health/budget UX pass**)
 
 This file is a concise reference for Codex (and any AI assistant working on this repo). Read it before making any changes to `index.html`, `sw.js`, or the import/Strava subsystems.
 
@@ -1728,6 +1728,57 @@ Verification run by codex before pushing:
 - Merge order matters: merge `fix-clear-all-data-event-bus` first, then `feat-merge-health-tab`.
 - Build `1.0.0 (8)` will still show old behavior. Eddie needs a new EAS/TestFlight build after both PRs merge.
 - Do not reintroduce "force quit" guidance for Clear All Data. In-memory reset is now part of the app contract.
+
+---
+
+## ✅ 2026-05-13 — Round-27: Health/budget UX pass
+
+Eddie noticed that the new Health tab's internal `Workouts / Nutrition` split still felt redundant because the embedded Fitness screen also had `Workouts / Activities`. This round takes the first top-app-inspired pass at making Health feel like a real hub instead of nested tabs.
+
+### Branch produced
+
+| Branch | Commit | Status | What |
+|---|---|---|---|
+| `feat-health-budget-ux-pass` | `ee96529` | Pushed to origin for PR | Clarifies Health sections and adds a real budget setup/editor flow in Finance. |
+
+### Product research direction
+
+This pass follows public UI patterns from top health/fitness apps without copying code or private assets:
+- Apple Health / Apple Fitness: top-level health overview first; detailed domains live underneath.
+- Strong / Hevy / Fitbod-style training apps: workout logging and workout history should live under a dedicated training surface.
+- Strava / Garmin / Fitbit-style activity apps: synced activity/history belongs in a progress/activity surface, not inside the workout-template logger.
+- MyFitnessPal / Cronometer-style nutrition apps: food/macros deserve their own focused area.
+
+### Health tab changes
+
+- `app/(tabs)/health.tsx` now exposes four top-level sections: `Today`, `Training`, `Food`, and `Progress`.
+- `Today` renders the Apple Health data card as the quick health overview.
+- `Training` embeds Fitness in training mode and hides Fitness's old nested segment.
+- `Food` embeds Nutrition.
+- `Progress` embeds Fitness in progress/activity mode and hides Fitness's old nested segment.
+- `section=workouts` still normalizes to `training`, so older dashboard/deep-link routes don't break.
+- Dashboard Start Workout quick action now routes to `/(tabs)/health?section=training`.
+- `app/(tabs)/fitness.tsx` now accepts `mode?: 'training' | 'progress'`. When mode is provided, it does not show the old `Workouts / Activities` segment.
+
+### Budget setup changes
+
+- Finance -> Budget now has an explicit `Budget plan` card and `Edit Budget` action.
+- New `BudgetEditorModal` lets the user set:
+  - monthly spending cap
+  - per-category allocation amounts
+  - new categories for budgeting
+- Existing category names are read-only in the budget modal because transactions store category names as strings. Renaming categories without a migration would orphan old transactions. A future dedicated category manager should migrate transaction/category references together.
+- New categories can be named while being created.
+- Setting an existing category allocation to `$0` keeps the category but leaves it unbudgeted.
+
+### Verification
+
+- `npx.cmd tsc --noEmit` passed after the code changes and again after the commit.
+- Tail/truncation checks passed for `app/(tabs)/health.tsx`, `app/(tabs)/fitness.tsx`, `app/(tabs)/index.tsx`, and `app/(tabs)/finance.tsx`.
+
+### Build note
+
+This work is not in TestFlight until `feat-health-budget-ux-pass` is merged and a new EAS/TestFlight build is made. If Round-26 becomes build `1.0.0 (9)`, this branch should become build `1.0.0 (10)` unless it is merged before the next build.
 
 ---
 
